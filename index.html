@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>paint</title>
+    <meta name="description" content="画像のアップロード、ペイント、保存ができるモダンで多機能なキャンバスアプリ。">
+    <link rel="stylesheet" href="paint_styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar glass">
+            <div class="logo">
+                <i class="fas fa-paint-brush"></i>
+                <span>Canvas Editor</span>
+            </div>
+
+            <section class="tool-section">
+                <h3>TOOLS</h3>
+                <div class="tool-grid">
+                    <button id="btn-pencil" class="tool-btn active" title="フリーハンド">
+                        <i class="fas fa-pencil-alt"></i>
+                    </button>
+                    <button id="btn-line" class="tool-btn" title="直線">
+                        <i class="fas fa-minus"></i>
+                    </button>
+                    <button id="btn-circle" class="tool-btn" title="円">
+                        <i class="far fa-circle"></i>
+                    </button>
+                    <button id="btn-text" class="tool-btn" title="テキスト">
+                        <i class="fas fa-font"></i>
+                    </button>
+                </div>
+            </section>
+
+            <section class="color-section">
+                <h3>COLORS</h3>
+                <div class="color-palette">
+                    <button class="color-btn active" data-color="#ff4d4d" title="赤" style="background-color: #ff4d4d;"></button>
+                    <button class="color-btn" data-color="#2ecc71" title="緑" style="background-color: #2ecc71;"></button>
+                    <button class="color-btn" data-color="#3498db" title="青" style="background-color: #3498db;"></button>
+                    <button class="color-btn" data-color="#9b59b6" title="紫" style="background-color: #9b59b6;"></button>
+                    <button class="color-btn" data-color="#e67e22" title="オレンジ" style="background-color: #e67e22;"></button>
+                    <button class="color-btn" data-color="#f1c40f" title="黄色" style="background-color: #f1c40f;"></button>
+                    <button class="color-btn" data-color="#ffffff" title="白" style="background-color: #ffffff;"></button>
+                    <button class="color-btn" data-color="#1e1e1e" title="黒" style="background-color: #1e1e1e;"></button>
+                </div>
+            </section>
+
+            <section class="brush-section">
+                <h3>BRUSH SIZE</h3>
+                <input type="range" id="brush-size" min="1" max="50" value="5" title="ブラシの太さ">
+                <span id="brush-size-val">5px</span>
+            </section>
+
+            <section class="action-section">
+                <input type="file" id="image-upload" accept="image/*" hidden>
+                <button id="btn-upload" class="action-btn upload-btn">
+                    <i class="fas fa-upload"></i> 画像をアップロード
+                </button>
+                <button id="btn-save" class="action-btn save-btn">
+                    <i class="fas fa-save"></i> 保存する
+                </button>
+                <button id="btn-clear" class="action-btn clear-btn">
+                    <i class="fas fa-trash"></i> クリア
+                </button>
+            </section>
+        </aside>
+
+        <main class="canvas-area">
+            <div id="canvas-container" class="canvas-container">
+                <canvas id="main-canvas"></canvas>
+                <div id="drop-zone" class="drop-zone-overlay">
+                    <p><i class="fas fa-cloud-upload-alt"></i> 画像をドラッグ＆ドロップまたはクリックでアップロード</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- UI Overlay for cursor or hints -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

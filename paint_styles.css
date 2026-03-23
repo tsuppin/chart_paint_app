@@ -1,0 +1,66 @@
+/* CSS Variable Definitions */
+:root {
+    --bg-main: #0f0f13;
+    --bg-canvas: #1c1c22;
+    --sidebar-bg: rgba(30,30,35,0.7);
+    --border-color: rgba(255,255,255,0.1);
+    --accent-color: #3498db;
+    --text-primary: #ffffff;
+    --text-secondary: #a0a0b0;
+    --glass-blur: 15px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+body { background: var(--bg-main); color: var(--text-primary); overflow: hidden; height: 100vh; }
+
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+.sidebar {
+    width: 100%;
+    background: var(--sidebar-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border-bottom: 1px solid var(--border-color);
+    padding: 0.8rem 1.5rem;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1.5rem;
+    flex-shrink: 0;
+    overflow-x: auto;
+}
+
+.logo { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; color: var(--accent-color); white-space: nowrap; }
+
+section { display: flex; flex-direction: row; align-items: center; gap: 0.8rem; }
+h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase; white-space: nowrap; }
+
+.tool-grid, .color-palette { display: flex; gap: 0.5rem; }
+.tool-btn { width: 40px; height: 40px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: #fff; cursor: pointer; }
+.tool-btn.active { background: var(--accent-color); border-color: var(--accent-color); }
+.color-btn { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.color-btn.active { border-color: #fff; }
+
+.brush-section { flex-direction: row; align-items: center; gap: 0.5rem; min-width: 150px; }
+#brush-size { flex-grow: 1; }
+
+.action-section { margin-left: auto; display: flex; gap: 0.8rem; }
+.action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem; }
+.upload-btn { background: rgba(46,204,113,0.2); color: #2ecc71; border: 1px solid #2ecc71; }
+.save-btn { background: var(--accent-color); color: #fff; }
+.clear-btn { background: rgba(255,77,77,0.2); color: #ff4d4d; border: 1px solid #ff4d4d; }
+
+.canvas-area { flex-grow: 1; display: flex; align-items: center; justify-content: center; background: var(--bg-canvas); padding: 1rem; overflow: auto; position: relative; }
+.canvas-container { background: #fff; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border-radius: 4px; position: relative; }
+#main-canvas { display: block; max-width: 100%; max-height: calc(100vh - 100px); }
+
+.drop-zone-overlay { position: absolute; top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); pointer-events:none; }
+.drop-zone-overlay.hidden { display: none; }
+
+@media (max-width: 800px) {
+    .sidebar { flex-wrap: wrap; height: auto; }
+}
