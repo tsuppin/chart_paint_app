@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const brushSizeVal = document.getElementById('brush-size-val');
 
     // === State ===
-    let currentTool = 'pencil'; // 'pencil', 'line', 'circle', 'text', 'hand'
+    let currentTool = 'pencil'; // 'pencil', 'line', 'circle', 'text'
     let currentColor = '#ff4d4d';
     let currentSize = 5;
     let isDrawing = false;
@@ -26,11 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let snapshot = null; // Buffer to store previous canvas state for shape previews
     let backgroundImage = null; // To keep track of uploaded image
     let currentZoom = 1.0;
-    let initialPinchDistance = null;
-    let initialPinchCenter = null;
-    let initialScrollLeft = 0;
-    let initialScrollTop = 0;
-    let initialZoom = 1.0;
+    let lastPinchDistance = null;
+    let lastPinchCenter = null;
 
     // === Zoom Logic ===
     function setZoom(zoom) {
@@ -163,17 +160,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const isTouch = e.type.startsWith('touch');
         const eventObj = isTouch ? e.touches[0] : e;
         
-        if (currentTool === 'hand') {
-            isDrawing = true;
-            const canvasArea = document.querySelector('.canvas-area');
-            startScrollLeft = canvasArea.scrollLeft;
-            startScrollTop = canvasArea.scrollTop;
-            startX = eventObj.clientX;
-            startY = eventObj.clientY;
-            canvas.style.cursor = 'grabbing';
-            return;
-        }
-
         const pos = getMousePos(eventObj);
         
         if (currentTool === 'text') {
@@ -205,19 +191,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const isTouch = e.type.startsWith('touch');
         const eventObj = isTouch ? e.touches[0] : e;
 
-        if (currentTool === 'hand') {
-            const canvasArea = document.querySelector('.canvas-area');
-            const currentX = eventObj.clientX;
-            const currentY = eventObj.clientY;
-            
-            const dx = currentX - startX;
-            const dy = currentY - startY;
-            
-            canvasArea.scrollLeft = startScrollLeft - dx;
-            canvasArea.scrollTop = startScrollTop - dy;
-            return;
-        }
-
         const pos = getMousePos(eventObj);
         
         // Restore snapshot before drawing preview (for line/circle)
@@ -248,9 +221,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDrawing) {
             ctx.closePath();
             isDrawing = false;
-            if (currentTool === 'hand') {
-                canvas.style.cursor = 'grab';
-            }
         }
     }
 
@@ -330,21 +300,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 'btn-pencil': 'Pencil',
                 'btn-line': 'Line',
                 'btn-circle': 'Circle',
-                'btn-text': 'Text',
-                'btn-hand': 'Hand (Swipe)'
+                'btn-text': 'Text'
             };
 
             if (btn.id === 'btn-pencil') currentTool = 'pencil';
             if (btn.id === 'btn-line') currentTool = 'line';
             if (btn.id === 'btn-circle') currentTool = 'circle';
             if (btn.id === 'btn-text') currentTool = 'text';
-            if (btn.id === 'btn-hand') currentTool = 'hand';
 
             document.getElementById('tool-status').innerText = `Mode: ${toolLabels[btn.id]}`;
 
-            // Toggle touch-action for panning
-            canvas.style.touchAction = (currentTool === 'hand') ? 'auto' : 'none';
-            canvas.style.cursor = (currentTool === 'hand') ? 'grab' : 'crosshair';
+            canvas.style.touchAction = 'none';
+            canvas.style.cursor = 'crosshair';
         });
     });
 
@@ -401,14 +368,8 @@ document.addEventListener('DOMContentLoaded', () => {
             startDraw(e);
         } else if (e.touches.length === 2) {
             e.preventDefault();
-            initialPinchDistance = getDistance(e.touches);
-            initialPinchCenter = getCenter(e.touches);
-            initialZoom = currentZoom;
-            
-            const canvasArea = document.querySelector('.canvas-area');
-            initialScrollLeft = canvasArea.scrollLeft;
-            initialScrollTop = canvasArea.scrollTop;
-            
+            lastPinchDistance = getDistance(e.touches);
+            lastPinchCenter = getCenter(e.touches);
             if (isDrawing) stopDraw();
         }
     }, { passive: false });
@@ -417,28 +378,38 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.touches.length === 1) {
             e.preventDefault();
             draw(e);
-        } else if (e.touches.length === 2 && initialPinchDistance !== null) {
+        } else if (e.touches.length === 2 && lastPinchDistance !== null) {
             e.preventDefault();
-            // Zoom logic
-            const currentDistance = getDistance(e.touches);
-            const scale = currentDistance / initialPinchDistance;
-            setZoom(initialZoom * scale);
             
-            // Pan logic
+            const currentDistance = getDistance(e.touches);
             const currentCenter = getCenter(e.touches);
-            const dx = currentCenter.x - initialPinchCenter.x;
-            const dy = currentCenter.y - initialPinchCenter.y;
+            
+            // Calculate deltas
+            const scaleDiff = currentDistance / lastPinchDistance;
+            const dx = currentCenter.x - lastPinchCenter.x;
+            const dy = currentCenter.y - lastPinchCenter.y;
             
             const canvasArea = document.querySelector('.canvas-area');
-            canvasArea.scrollLeft = initialScrollLeft - dx;
-            canvasArea.scrollTop = initialScrollTop - dy;
+            
+            // First adjust pan
+            canvasArea.scrollLeft -= dx;
+            canvasArea.scrollTop -= dy;
+            
+            // Then adjust zoom if changed significantly
+            if (Math.abs(scaleDiff - 1.0) > 0.005) {
+                setZoom(currentZoom * scaleDiff);
+            }
+            
+            // Update tracking
+            lastPinchCenter = currentCenter;
+            lastPinchDistance = currentDistance;
         }
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
         if (e.touches.length < 2) {
-            initialPinchDistance = null;
-            initialPinchCenter = null;
+            lastPinchDistance = null;
+            lastPinchCenter = null;
         }
         if (e.touches.length === 0) {
             stopDraw();
