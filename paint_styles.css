@@ -29,9 +29,17 @@ body { background: var(--bg-main); color: var(--text-primary); overflow: hidden;
     display: flex;
     flex-direction: row;
     align-items: center;
+    justify-content: space-between;
     gap: 1.5rem;
     flex-shrink: 0;
-    overflow-x: auto;
+}
+
+.toolbar-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 1.5rem;
 }
 
 .logo { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; color: var(--accent-color); white-space: nowrap; }
@@ -82,11 +90,31 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     position: relative; 
     margin: auto; /* this centers content but allows scroll to start from top-left if overflow */
 }
-#main-canvas { display: block; max-width: 100%; max-height: calc(100vh - 100px); }
+#main-canvas { display: block; }
 
 .drop-zone-overlay { position: absolute; top:0; left:0; right:0; bottom:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); pointer-events:none; }
 .drop-zone-overlay.hidden { display: none; }
 
 @media (max-width: 800px) {
-    .sidebar { flex-wrap: wrap; height: auto; }
+    .sidebar { 
+        flex-direction: column; 
+        align-items: stretch; 
+        padding: 0.5rem; 
+        height: auto; 
+        gap: 0.5rem;
+    }
+    .toolbar-row { 
+        justify-content: flex-start; 
+        gap: 0.8rem; 
+        overflow-x: auto; 
+    }
+    .toolbar-row::-webkit-scrollbar {
+        display: none;
+    }
+    .tool-btn { width: 36px; height: 36px; }
+    .color-btn { width: 24px; height: 24px; }
+    .action-btn { font-size: 0.75rem; padding: 0.4rem 0.6rem; }
+    .brush-section { min-width: 100px; }
+    .action-section { margin-left: 0; }
+    .canvas-area { padding: 0; }
 }

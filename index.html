@@ -5,16 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>paint</title>
     <meta name="description" content="画像のアップロード、ペイント、保存ができるモダンで多機能なキャンバスアプリ。">
-    <link rel="stylesheet" href="paint_styles.css">
+    <link rel="stylesheet" href="paint_styles.css?v=4">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="app-container">
         <aside class="sidebar glass">
-
-
-            <section class="tool-section">
+            <div class="toolbar-row">
+                <section class="tool-section">
                 <div class="tool-grid">
                     <button id="btn-pencil" class="tool-btn active" title="フリーハンド">
                         <i class="fas fa-pencil-alt"></i>
@@ -46,8 +45,10 @@
                     <button class="color-btn" data-color="#1e1e1e" title="黒" style="background-color: #1e1e1e;"></button>
                 </div>
             </section>
+            </div>
 
-            <section class="brush-section">
+            <div class="toolbar-row">
+                <section class="brush-section">
                 <input type="range" id="brush-size" min="1" max="50" value="5" title="ブラシの太さ">
                 <span id="brush-size-val">5px</span>
             </section>
@@ -64,6 +65,7 @@
                     <i class="fas fa-trash"></i>
                 </button>
             </section>
+            </div>
         </aside>
 
         <main class="canvas-area">
@@ -82,6 +84,6 @@
         <div class="spinner"></div>
     </div>
 
-    <script src="script.js?v=2"></script>
+    <script src="script.js?v=3"></script>
 </body>
 </html>

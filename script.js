@@ -29,9 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Canvas Initialization ===
     function initCanvas() {
         const parent = canvas.parentElement;
-        // Default size if no image
+        // Default size if no image. Make taller if mobile.
+        const isMobile = window.innerWidth <= 768;
         canvas.width = 800;
-        canvas.height = 600;
+        canvas.height = isMobile ? 1200 : 800;
         
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -234,22 +235,20 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onload = () => {
                 backgroundImage = img;
                 
-                // Adjust canvas size to image while keeping it visible
-                // Limit maximum display size to roughly viewport
-                const maxWidth = window.innerWidth * 0.7;
-                const maxHeight = window.innerHeight * 0.8;
+                // Keep original size so users can pan and draw in detail on mobile
+                // Only scale down if the image is astronomically large (e.g. over 3000px)
+                const MAX_DIM = 3000;
                 
                 let width = img.width;
                 let height = img.height;
 
-                // Scale down if image is too large for canvas area
-                if (width > maxWidth) {
-                    height *= maxWidth / width;
-                    width = maxWidth;
+                if (width > MAX_DIM) {
+                    height *= MAX_DIM / width;
+                    width = MAX_DIM;
                 }
-                if (height > maxHeight) {
-                    width *= maxHeight / height;
-                    height = maxHeight;
+                if (height > MAX_DIM) {
+                    width *= MAX_DIM / height;
+                    height = MAX_DIM;
                 }
 
                 canvas.width = img.width; // Use full size for quality
