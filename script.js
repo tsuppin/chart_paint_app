@@ -27,6 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let backgroundImage = null; // To keep track of uploaded image
     let currentZoom = 1.0;
     let initialPinchDistance = null;
+    let initialPinchCenter = null;
+    let initialScrollLeft = 0;
+    let initialScrollTop = 0;
     let initialZoom = 1.0;
 
     // === Zoom Logic ===
@@ -42,6 +45,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const dx = touches[0].clientX - touches[1].clientX;
         const dy = touches[0].clientY - touches[1].clientY;
         return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function getCenter(touches) {
+        return {
+            x: (touches[0].clientX + touches[1].clientX) / 2,
+            y: (touches[0].clientY + touches[1].clientY) / 2
+        };
     }
 
     // === Canvas Initialization ===
@@ -392,7 +402,13 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (e.touches.length === 2) {
             e.preventDefault();
             initialPinchDistance = getDistance(e.touches);
+            initialPinchCenter = getCenter(e.touches);
             initialZoom = currentZoom;
+            
+            const canvasArea = document.querySelector('.canvas-area');
+            initialScrollLeft = canvasArea.scrollLeft;
+            initialScrollTop = canvasArea.scrollTop;
+            
             if (isDrawing) stopDraw();
         }
     }, { passive: false });
@@ -403,15 +419,26 @@ document.addEventListener('DOMContentLoaded', () => {
             draw(e);
         } else if (e.touches.length === 2 && initialPinchDistance !== null) {
             e.preventDefault();
+            // Zoom logic
             const currentDistance = getDistance(e.touches);
             const scale = currentDistance / initialPinchDistance;
             setZoom(initialZoom * scale);
+            
+            // Pan logic
+            const currentCenter = getCenter(e.touches);
+            const dx = currentCenter.x - initialPinchCenter.x;
+            const dy = currentCenter.y - initialPinchCenter.y;
+            
+            const canvasArea = document.querySelector('.canvas-area');
+            canvasArea.scrollLeft = initialScrollLeft - dx;
+            canvasArea.scrollTop = initialScrollTop - dy;
         }
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
         if (e.touches.length < 2) {
             initialPinchDistance = null;
+            initialPinchCenter = null;
         }
         if (e.touches.length === 0) {
             stopDraw();
