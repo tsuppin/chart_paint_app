@@ -25,6 +25,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let startScrollTop = 0;
     let snapshot = null; // Buffer to store previous canvas state for shape previews
     let backgroundImage = null; // To keep track of uploaded image
+    let currentZoom = 1.0;
+    let initialPinchDistance = null;
+    let initialZoom = 1.0;
+
+    // === Zoom Logic ===
+    function setZoom(zoom) {
+        const MIN_ZOOM = 0.1;
+        const MAX_ZOOM = 5.0;
+        currentZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+        canvas.style.width = `${canvas.width * currentZoom}px`;
+        canvas.style.height = `${canvas.height * currentZoom}px`;
+    }
+
+    function getDistance(touches) {
+        const dx = touches[0].clientX - touches[1].clientX;
+        const dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
 
     // === Canvas Initialization ===
     function initCanvas() {
@@ -38,6 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.lineJoin = 'round';
         ctx.lineWidth = currentSize;
         ctx.strokeStyle = currentColor;
+        
+        setZoom(1.0);
         
         // Initial Background
         ctx.fillStyle = '#ffffff';
@@ -254,6 +274,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 canvas.width = img.width; // Use full size for quality
                 canvas.height = img.height;
                 
+                setZoom(1.0);
+                
                 ctx.drawImage(img, 0, 0);
                 
                 // Update UI
@@ -367,6 +389,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.touches.length === 1) {
             e.preventDefault();
             startDraw(e);
+        } else if (e.touches.length === 2) {
+            e.preventDefault();
+            initialPinchDistance = getDistance(e.touches);
+            initialZoom = currentZoom;
+            if (isDrawing) stopDraw();
         }
     }, { passive: false });
 
@@ -374,12 +401,32 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.touches.length === 1) {
             e.preventDefault();
             draw(e);
+        } else if (e.touches.length === 2 && initialPinchDistance !== null) {
+            e.preventDefault();
+            const currentDistance = getDistance(e.touches);
+            const scale = currentDistance / initialPinchDistance;
+            setZoom(initialZoom * scale);
         }
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
-        stopDraw();
+        if (e.touches.length < 2) {
+            initialPinchDistance = null;
+        }
+        if (e.touches.length === 0) {
+            stopDraw();
+        }
     });
+
+    // Desktop pinch to zoom equivalent (Ctrl + Wheel)
+    const canvasArea = document.querySelector('.canvas-area');
+    canvasArea.addEventListener('wheel', (e) => {
+        if (e.ctrlKey) {
+            e.preventDefault();
+            const zoomChange = e.deltaY > 0 ? 0.9 : 1.1;
+            setZoom(currentZoom * zoomChange);
+        }
+    }, { passive: false });
 
     // Mobile View Toggle
     function checkMobile() {
