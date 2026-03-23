@@ -12,13 +12,9 @@
 <body>
     <div class="app-container">
         <aside class="sidebar glass">
-            <div class="logo">
-                <i class="fas fa-paint-brush"></i>
-                <span>Canvas Editor</span>
-            </div>
+
 
             <section class="tool-section">
-                <h3>TOOLS</h3>
                 <div class="tool-grid">
                     <button id="btn-pencil" class="tool-btn active" title="フリーハンド">
                         <i class="fas fa-pencil-alt"></i>
@@ -39,7 +35,6 @@
             </section>
 
             <section class="color-section">
-                <h3>COLORS</h3>
                 <div class="color-palette">
                     <button class="color-btn active" data-color="#ff4d4d" title="赤" style="background-color: #ff4d4d;"></button>
                     <button class="color-btn" data-color="#2ecc71" title="緑" style="background-color: #2ecc71;"></button>
@@ -53,21 +48,20 @@
             </section>
 
             <section class="brush-section">
-                <h3>BRUSH SIZE</h3>
                 <input type="range" id="brush-size" min="1" max="50" value="5" title="ブラシの太さ">
                 <span id="brush-size-val">5px</span>
             </section>
 
             <section class="action-section">
                 <input type="file" id="image-upload" accept="image/*" hidden>
-                <button id="btn-upload" class="action-btn upload-btn">
-                    <i class="fas fa-upload"></i> 画像をアップロード
+                <button id="btn-upload" class="action-btn upload-btn" title="画像をアップロード">
+                    画
                 </button>
-                <button id="btn-save" class="action-btn save-btn">
-                    <i class="fas fa-save"></i> 保存する
+                <button id="btn-save" class="action-btn save-btn" title="保存する">
+                    保
                 </button>
-                <button id="btn-clear" class="action-btn clear-btn">
-                    <i class="fas fa-trash"></i> クリア
+                <button id="btn-clear" class="action-btn clear-btn" title="クリア">
+                    <i class="fas fa-trash"></i>
                 </button>
             </section>
         </aside>
