@@ -15,12 +15,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const brushSizeVal = document.getElementById('brush-size-val');
 
     // === State ===
-    let currentTool = 'pencil'; // 'pencil', 'line', 'circle', 'text'
+    let currentTool = 'pencil'; // 'pencil', 'line', 'circle', 'text', 'hand'
     let currentColor = '#ff4d4d';
     let currentSize = 5;
     let isDrawing = false;
     let startX = 0;
     let startY = 0;
+    let startScrollLeft = 0;
+    let startScrollTop = 0;
     let snapshot = null; // Buffer to store previous canvas state for shape previews
     let backgroundImage = null; // To keep track of uploaded image
 
@@ -126,7 +128,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function startDraw(e) {
-        const pos = getMousePos(e);
+        // Handle input abstraction (Mouse/Touch)
+        const isTouch = e.type.startsWith('touch');
+        const eventObj = isTouch ? e.touches[0] : e;
+        
+        if (currentTool === 'hand') {
+            isDrawing = true;
+            const canvasArea = document.querySelector('.canvas-area');
+            startScrollLeft = canvasArea.scrollLeft;
+            startScrollTop = canvasArea.scrollTop;
+            startX = eventObj.clientX;
+            startY = eventObj.clientY;
+            canvas.style.cursor = 'grabbing';
+            return;
+        }
+
+        const pos = getMousePos(eventObj);
         
         if (currentTool === 'text') {
             addTextInput(pos.x, pos.y);
@@ -143,7 +160,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.beginPath();
         ctx.lineWidth = currentSize;
         ctx.strokeStyle = currentColor;
-        ctx.fillStyle = currentColor;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         
         if (currentTool === 'pencil') {
             ctx.moveTo(startX, startY);
@@ -153,7 +171,23 @@ document.addEventListener('DOMContentLoaded', () => {
     function draw(e) {
         if (!isDrawing) return;
         
-        const pos = getMousePos(e);
+        const isTouch = e.type.startsWith('touch');
+        const eventObj = isTouch ? e.touches[0] : e;
+
+        if (currentTool === 'hand') {
+            const canvasArea = document.querySelector('.canvas-area');
+            const currentX = eventObj.clientX;
+            const currentY = eventObj.clientY;
+            
+            const dx = currentX - startX;
+            const dy = currentY - startY;
+            
+            canvasArea.scrollLeft = startScrollLeft - dx;
+            canvasArea.scrollTop = startScrollTop - dy;
+            return;
+        }
+
+        const pos = getMousePos(eventObj);
         
         // Restore snapshot before drawing preview (for line/circle)
         if (currentTool !== 'pencil') {
@@ -162,7 +196,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ctx.lineWidth = currentSize;
         ctx.strokeStyle = currentColor;
-        ctx.fillStyle = currentColor; // For circle stroke (if wanted filled or just outline)
 
         if (currentTool === 'pencil') {
             ctx.lineTo(pos.x, pos.y);
@@ -184,6 +217,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDrawing) {
             ctx.closePath();
             isDrawing = false;
+            if (currentTool === 'hand') {
+                canvas.style.cursor = 'grab';
+            }
         }
     }
 
@@ -253,20 +289,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // === Event Listeners ===
 
-    canvas.addEventListener('mousedown', startDraw);
-    canvas.addEventListener('mousemove', draw);
-    window.addEventListener('mouseup', stopDraw);
-
     // Tools
     toolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             toolBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             
+            const toolLabels = {
+                'btn-pencil': 'Pencil',
+                'btn-line': 'Line',
+                'btn-circle': 'Circle',
+                'btn-text': 'Text',
+                'btn-hand': 'Hand (Swipe)'
+            };
+
             if (btn.id === 'btn-pencil') currentTool = 'pencil';
             if (btn.id === 'btn-line') currentTool = 'line';
             if (btn.id === 'btn-circle') currentTool = 'circle';
             if (btn.id === 'btn-text') currentTool = 'text';
+            if (btn.id === 'btn-hand') currentTool = 'hand';
+
+            document.getElementById('tool-status').innerText = `Mode: ${toolLabels[btn.id]}`;
+
+            // Toggle touch-action for panning
+            canvas.style.touchAction = (currentTool === 'hand') ? 'auto' : 'none';
+            canvas.style.cursor = (currentTool === 'hand') ? 'grab' : 'crosshair';
         });
     });
 
@@ -312,30 +359,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!backgroundImage) imageInput.click();
     });
 
-    // Touch support (Optional but good)
+    canvas.addEventListener('mousedown', startDraw);
+    canvas.addEventListener('mousemove', draw);
+    window.addEventListener('mouseup', stopDraw);
+
+    // Unified Touch support
     canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        const mouseEvent = new MouseEvent('mousedown', {
-            clientX: touch.clientX,
-            clientY: touch.clientY
-        });
-        canvas.dispatchEvent(mouseEvent);
+        if (e.touches.length === 1) {
+            e.preventDefault();
+            startDraw(e);
+        }
     }, { passive: false });
 
     canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        const mouseEvent = new MouseEvent('mousemove', {
-            clientX: touch.clientX,
-            clientY: touch.clientY
-        });
-        canvas.dispatchEvent(mouseEvent);
+        if (e.touches.length === 1) {
+            e.preventDefault();
+            draw(e);
+        }
     }, { passive: false });
 
     canvas.addEventListener('touchend', (e) => {
-        const mouseEvent = new MouseEvent('mouseup', {});
-        window.dispatchEvent(mouseEvent);
+        stopDraw();
     });
 
     // Mobile View Toggle

@@ -32,6 +32,9 @@
                     <button id="btn-text" class="tool-btn" title="テキスト">
                         <i class="fas fa-font"></i>
                     </button>
+                    <button id="btn-hand" class="tool-btn" title="移動（スワイプ）">
+                        <i class="fas fa-hand-paper"></i>
+                    </button>
                 </div>
             </section>
 
@@ -70,6 +73,7 @@
         </aside>
 
         <main class="canvas-area">
+            <div class="tool-status" id="tool-status">Mode: Pencil</div>
             <div id="canvas-container" class="canvas-container">
                 <canvas id="main-canvas"></canvas>
                 <div id="drop-zone" class="drop-zone-overlay">
@@ -84,6 +88,6 @@
         <div class="spinner"></div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=2"></script>
 </body>
 </html>
