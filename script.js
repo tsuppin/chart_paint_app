@@ -77,7 +77,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function drawText(text, x, y) {
         ctx.font = `${currentSize * 4}px Inter, sans-serif`;
         ctx.fillStyle = currentColor;
-        ctx.fillText(text, x, y);
+        const lines = text.split('\n');
+        const lineHeight = currentSize * 4 * 1.2;
+        lines.forEach((line, index) => {
+            ctx.fillText(line, x, y + (index * lineHeight));
+        });
     }
 
     function addTextInput(x, y) {
@@ -85,10 +89,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const existingInput = document.getElementById('temp-text-input');
         if (existingInput) existingInput.remove();
 
-        const input = document.createElement('input');
+        const input = document.createElement('textarea');
         input.id = 'temp-text-input';
-        input.type = 'text';
-        input.placeholder = '文字を入力...';
+        input.placeholder = '文字を入力...\n(枠外クリックで確定)';
         
         // Use the container for absolute positioning
         const container = document.getElementById('canvas-container');
@@ -104,17 +107,29 @@ document.addEventListener('DOMContentLoaded', () => {
         input.style.font = `${currentSize * 4 * scaleX}px Inter, sans-serif`;
         input.style.color = currentColor;
         input.style.background = 'rgba(30, 30, 35, 0.9)';
-        input.style.border = '2px solid' + currentColor;
+        input.style.border = '2px solid ' + currentColor;
         input.style.borderRadius = '4px';
         input.style.outline = 'none';
         input.style.zIndex = '1000';
         input.style.padding = '4px 8px';
-        input.style.minWidth = '100px';
+        input.style.minWidth = '150px';
+        input.style.resize = 'both';
+        input.style.overflow = 'hidden';
+        input.style.whiteSpace = 'pre';
 
         container.appendChild(input);
         
         // Focus with a slight delay to ensure it's in the DOM
-        setTimeout(() => input.focus(), 10);
+        setTimeout(() => {
+            input.focus();
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        }, 10);
+
+        input.addEventListener('input', () => {
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        });
 
         const handleFinish = () => {
             if (input.value && input.value !== input.placeholder) {
@@ -126,7 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+            // 改行を許可するため単体のEnterは確定させない
+            if (e.key === 'Enter' && e.ctrlKey) {
                 handleFinish();
             }
             if (e.key === 'Escape') {
@@ -385,7 +401,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentCenter = getCenter(e.touches);
             
             // Calculate deltas
-            const scaleDiff = currentDistance / lastPinchDistance;
+            const rawScaleDiff = currentDistance / lastPinchDistance;
+            const scaleDiff = 1 + (rawScaleDiff - 1.0) * 0.4; // スピードを緩やかにする
             const dx = currentCenter.x - lastPinchCenter.x;
             const dy = currentCenter.y - lastPinchCenter.y;
             
@@ -396,7 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
             canvasArea.scrollTop -= dy;
             
             // Then adjust zoom if changed significantly
-            if (Math.abs(scaleDiff - 1.0) > 0.005) {
+            if (Math.abs(scaleDiff - 1.0) > 0.002) {
                 setZoom(currentZoom * scaleDiff);
             }
             
@@ -421,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     canvasArea.addEventListener('wheel', (e) => {
         if (e.ctrlKey) {
             e.preventDefault();
-            const zoomChange = e.deltaY > 0 ? 0.9 : 1.1;
+            const zoomChange = e.deltaY > 0 ? 0.97 : 1.03; // 縮尺スピードを緩やかに
             setZoom(currentZoom * zoomChange);
         }
     }, { passive: false });

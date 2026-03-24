@@ -11,12 +11,12 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-body { background: var(--bg-main); color: var(--text-primary); overflow: hidden; height: 100vh; }
+body { background: var(--bg-main); color: var(--text-primary); overflow: hidden; height: 100dvh; margin: 0; touch-action: none; overscroll-behavior: none; }
 
 .app-container {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100dvh;
 }
 
 .sidebar {
@@ -72,15 +72,18 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
 }
 
 .tool-status {
-    position: absolute;
-    top: 10px;
-    left: 10px;
+    position: fixed;
+    top: calc(var(--sidebar-height, 0px) + 80px); /* fallback if variable not set */
+    left: 20px;
     background: rgba(0,0,0,0.5);
     padding: 5px 12px;
     border-radius: 20px;
     font-size: 0.8rem;
     color: var(--accent-color);
     z-index: 100;
+}
+@media (max-width: 800px) {
+    .tool-status { top: 120px; left: 10px; }
 }
 
 .canvas-container { 
