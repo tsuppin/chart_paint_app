@@ -32,6 +32,7 @@ body { background: var(--bg-main); color: var(--text-primary); overflow: hidden;
     justify-content: space-between;
     gap: 1.5rem;
     flex-shrink: 0;
+    position: relative;
 }
 
 .toolbar-row {
@@ -63,6 +64,17 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
 .undo-btn { background: rgba(230,126,34,0.2); color: #e67e22; border: 1px solid #e67e22; transition: opacity 0.2s; }
 .undo-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .clear-btn { background: rgba(255,77,77,0.2); color: #ff4d4d; border: 1px solid #ff4d4d; }
+
+.image-filename {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+    opacity: 0.8;
+    align-self: center;
+}
 
 .canvas-area { 
     flex-grow: 1; 
@@ -122,4 +134,12 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     .brush-section { min-width: 100px; }
     .action-section { margin-left: 0; }
     .canvas-area { padding: 0; }
+    .image-filename {
+        position: absolute;
+        bottom: 3px;
+        right: 6px;
+        font-size: 0.55rem;
+        max-width: 140px;
+        opacity: 0.7;
+    }
 }

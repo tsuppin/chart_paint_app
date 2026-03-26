@@ -302,6 +302,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function handleImage(file) {
         if (!file || !file.type.startsWith('image/')) return;
 
+        // ファイル名を表示
+        const filenameEl = document.getElementById('image-filename');
+        if (filenameEl) filenameEl.textContent = file.name;
+
         const reader = new FileReader();
         reader.onload = (e) => {
             const img = new Image();
