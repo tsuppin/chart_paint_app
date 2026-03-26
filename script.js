@@ -1,402 +1,385 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // === DOM Elements ===
     const canvas = document.getElementById('main-canvas');
     const ctx = canvas.getContext('2d');
-    const dropZone = document.getElementById('drop-zone');
-    const imageInput = document.getElementById('image-upload');
-    const btnUpload = document.getElementById('btn-upload');
-    const btnSave = document.getElementById('btn-save');
-    const btnClear = document.getElementById('btn-clear');
-    const btnUndo = document.getElementById('btn-undo');
-    
-    // Tools & Colors
-    const toolBtns = document.querySelectorAll('.tool-btn');
-    const colorBtns = document.querySelectorAll('.color-btn');
+    // baseCanvas = 背景画像のみ（描画内容は全て shapes[] で管理）
+    const baseCanvas = document.createElement('canvas');
+    const baseCtx = baseCanvas.getContext('2d');
+
+    const dropZone    = document.getElementById('drop-zone');
+    const imageInput  = document.getElementById('image-upload');
+    const btnUpload   = document.getElementById('btn-upload');
+    const btnSave     = document.getElementById('btn-save');
+    const btnClear    = document.getElementById('btn-clear');
+    const btnUndo     = document.getElementById('btn-undo');
+    const toolBtns    = document.querySelectorAll('.tool-btn');
+    const colorBtns   = document.querySelectorAll('.color-btn');
     const brushSizeInput = document.getElementById('brush-size');
-    const brushSizeVal = document.getElementById('brush-size-val');
+    const brushSizeVal   = document.getElementById('brush-size-val');
 
     // === State ===
-    let currentTool = 'pencil'; // 'pencil', 'line', 'circle', 'text'
-    let currentColor = '#ff4d4d';
-    let currentSize = 5;
-    let isDrawing = false;
-    let startX = 0;
-    let startY = 0;
-    let startScrollLeft = 0;
-    let startScrollTop = 0;
-    let snapshot = null; // Buffer to store previous canvas state for shape previews
-    let undoStack = []; // アンドゥ用の履歴スタック
-    const MAX_UNDO = 30; // 最大アンドゥ回数
-    let backgroundImage = null; // To keep track of uploaded image
-    let currentZoom = 1.0;
-    let lastPinchDistance = null;
-    let lastPinchCenter = null;
+    let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 5;
+    let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
+    let currentPath = []; // ペンシル描画中の点列
 
-    // === Zoom Logic ===
-    function setZoom(zoom) {
-        const MIN_ZOOM = 0.1;
-        const MAX_ZOOM = 5.0;
-        currentZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
-        canvas.style.width = `${canvas.width * currentZoom}px`;
+    // shapes 配列: 全描画オブジェクトを格納
+    // pencil: { type:'pencil', points:[{x,y}...], color, size }
+    // line:   { type:'line',   x1,y1,x2,y2, color, size }
+    // circle: { type:'circle', cx,cy,rx,ry,  color, size }
+    // text:   { type:'text',   text,x,y,     color, size }
+    let shapes = [], selectedShape = null;
+    let isDragging = false, dragStartX = 0, dragStartY = 0;
+    let undoStack = [];
+    const MAX_UNDO = 30;
+    let backgroundImage = null, currentZoom = 1.0;
+    let lastPinchDistance = null, lastPinchCenter = null;
+
+    // === Zoom ===
+    function setZoom(z) {
+        currentZoom = Math.max(0.1, Math.min(5.0, z));
+        canvas.style.width  = `${canvas.width  * currentZoom}px`;
         canvas.style.height = `${canvas.height * currentZoom}px`;
     }
+    const getDist   = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
+    const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
-    function getDistance(touches) {
-        const dx = touches[0].clientX - touches[1].clientX;
-        const dy = touches[0].clientY - touches[1].clientY;
-        return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    function getCenter(touches) {
-        return {
-            x: (touches[0].clientX + touches[1].clientX) / 2,
-            y: (touches[0].clientY + touches[1].clientY) / 2
-        };
-    }
-
-    // === Canvas Initialization ===
+    // === Canvas Init ===
     function initCanvas() {
-        const parent = canvas.parentElement;
-        // Default size if no image. Make taller if mobile.
-        const isMobile = window.innerWidth <= 768;
-        canvas.width = 800;
-        canvas.height = isMobile ? 1200 : 800;
-        
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = currentSize;
-        ctx.strokeStyle = currentColor;
-        
-        setZoom(1.0);
-        
-        // Initial Background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // 初期状態をアンドゥスタックに保存
-        undoStack = [];
-        saveUndoState();
+        const mob = window.innerWidth <= 768;
+        canvas.width = baseCanvas.width = mob ? 600 : 800;
+        canvas.height = baseCanvas.height = mob ? 900 : 800;
+        canvas.style.touchAction = 'none';
+        canvas.style.cursor = 'crosshair';
+        baseCtx.fillStyle = '#ffffff';
+        baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
+        shapes = []; selectedShape = null; currentPath = [];
+        setZoom(1.0); composite();
+        undoStack = []; saveUndoState();
     }
-
     initCanvas();
 
-    // === Undo Logic ===
+    // === Composite: baseCanvas + 全シェイプ → メインキャンバス ===
+    function composite(preview) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(baseCanvas, 0, 0);
+        shapes.forEach(s => drawObj(ctx, s, s === selectedShape));
+        if (preview) drawObj(ctx, preview, false);
+    }
+
+    function drawObj(tc, s, sel) {
+        tc.save();
+        tc.lineWidth = s.size;
+        tc.strokeStyle = s.color;
+        tc.lineCap = 'round';
+        tc.lineJoin = 'round';
+        if (sel) { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
+
+        if (s.type === 'pencil') {
+            if (s.points.length < 2) { tc.restore(); return; }
+            if (sel) tc.setLineDash([6, 4]);
+            tc.beginPath();
+            s.points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+            tc.stroke();
+
+        } else if (s.type === 'line') {
+            if (sel) tc.setLineDash([8, 5]);
+            tc.beginPath();
+            tc.moveTo(s.x1, s.y1); tc.lineTo(s.x2, s.y2);
+            tc.stroke();
+
+        } else if (s.type === 'circle') {
+            if (sel) tc.setLineDash([8, 5]);
+            tc.beginPath();
+            tc.ellipse(s.cx, s.cy, s.rx, s.ry, 0, 0, 2*Math.PI);
+            tc.stroke();
+
+        } else if (s.type === 'text') {
+            const fontSize = s.size * 4;
+            const lineH = fontSize * 1.2;
+            tc.font = `${fontSize}px Inter, sans-serif`;
+            tc.fillStyle = s.color;
+            s.text.split('\n').forEach((l, i) => tc.fillText(l, s.x, s.y + i * lineH));
+            if (sel) {
+                // 選択時: テキスト周りを破線ボックスで表示
+                const lines = s.text.split('\n');
+                const estW = lines.reduce((m, l) => Math.max(m, l.length * fontSize * 0.6), 20);
+                const h = lines.length * lineH;
+                tc.setLineDash([4, 3]);
+                tc.strokeStyle = 'rgba(255,255,255,0.85)';
+                tc.lineWidth = 1.5;
+                tc.shadowBlur = 0;
+                tc.strokeRect(s.x - 5, s.y - fontSize - 5, estW + 10, h + 10);
+            }
+        }
+        tc.restore();
+    }
+
+    // === Undo ===
+    function cloneID(id) { return new ImageData(new Uint8ClampedArray(id.data), id.width, id.height); }
+    function cloneShapes(arr) {
+        return arr.map(s => s.type === 'pencil' ? {...s, points: s.points.map(p=>({...p}))} : {...s});
+    }
     function saveUndoState() {
-        undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-        if (undoStack.length > MAX_UNDO) {
-            undoStack.shift();
-        }
-        updateUndoBtn();
-    }
-
-    function undo() {
-        if (undoStack.length <= 1) return; // 最初の状態は消さない
-        undoStack.pop(); // 現在の状態を破棄
-        const prevState = undoStack[undoStack.length - 1];
-        ctx.putImageData(prevState, 0, 0);
-        updateUndoBtn();
-    }
-
-    function updateUndoBtn() {
-        if (btnUndo) {
-            btnUndo.disabled = undoStack.length <= 1;
-        }
-    }
-
-    // === Text Tool Logic ===
-    function drawText(text, x, y) {
-        ctx.font = `${currentSize * 4}px Inter, sans-serif`;
-        ctx.fillStyle = currentColor;
-        const lines = text.split('\n');
-        const lineHeight = currentSize * 4 * 1.2;
-        lines.forEach((line, index) => {
-            ctx.fillText(line, x, y + (index * lineHeight));
+        undoStack.push({
+            base: cloneID(baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height)),
+            shapes: cloneShapes(shapes)
         });
+        if (undoStack.length > MAX_UNDO) undoStack.shift();
+        updateUndoBtn();
+    }
+    function undo() {
+        if (undoStack.length <= 1) return;
+        undoStack.pop();
+        const p = undoStack[undoStack.length - 1];
+        baseCtx.putImageData(cloneID(p.base), 0, 0);
+        shapes = cloneShapes(p.shapes);
+        selectedShape = null;
+        composite();
+        updateUndoBtn();
+    }
+    function updateUndoBtn() { if (btnUndo) btnUndo.disabled = undoStack.length <= 1; }
+
+    // === Hit Test ===
+    function distToSeg(px, py, x1, y1, x2, y2) {
+        const dx=x2-x1, dy=y2-y1, l=dx*dx+dy*dy;
+        if (!l) return Math.hypot(px-x1, py-y1);
+        const t = Math.max(0, Math.min(1, ((px-x1)*dx+(py-y1)*dy)/l));
+        return Math.hypot(px-(x1+t*dx), py-(y1+t*dy));
     }
 
-    function addTextInput(x, y) {
-        // Remove any existing inputs
-        const existingInput = document.getElementById('temp-text-input');
-        if (existingInput) existingInput.remove();
+    function hitTest(px, py) {
+        for (let i = shapes.length - 1; i >= 0; i--) {
+            const s = shapes[i];
+            const thr = Math.max(s.size / 2 + 10, 14);
 
+            if (s.type === 'pencil') {
+                const step = Math.max(1, Math.floor(s.points.length / 80));
+                for (let j = 0; j < s.points.length - 1; j += step) {
+                    if (distToSeg(px, py, s.points[j].x, s.points[j].y, s.points[j+1].x, s.points[j+1].y) <= thr) return s;
+                }
+            } else if (s.type === 'line') {
+                if (distToSeg(px, py, s.x1, s.y1, s.x2, s.y2) <= thr) return s;
+            } else if (s.type === 'circle') {
+                const nd = Math.hypot((px-s.cx)/s.rx, (py-s.cy)/s.ry);
+                if (Math.abs(nd - 1) <= thr / Math.min(s.rx, s.ry)) return s;
+            } else if (s.type === 'text') {
+                const fontSize = s.size * 4;
+                const lineH = fontSize * 1.2;
+                const lines = s.text.split('\n');
+                const estW = lines.reduce((m, l) => Math.max(m, l.length * fontSize * 0.6), 20);
+                const h = lines.length * lineH;
+                if (px >= s.x-14 && px <= s.x+estW+14 && py >= s.y-fontSize-14 && py <= s.y+h+14) return s;
+            }
+        }
+        return null;
+    }
+
+    function moveShape(s, dx, dy) {
+        if (s.type === 'line')   { s.x1+=dx; s.y1+=dy; s.x2+=dx; s.y2+=dy; }
+        if (s.type === 'circle') { s.cx+=dx; s.cy+=dy; }
+        if (s.type === 'pencil') { s.points = s.points.map(p => ({x:p.x+dx, y:p.y+dy})); }
+        if (s.type === 'text')   { s.x+=dx; s.y+=dy; }
+    }
+
+    // === Text Input Overlay ===
+    function addTextInput(x, y) {
+        const ex = document.getElementById('temp-text-input');
+        if (ex) ex.remove();
         const input = document.createElement('textarea');
         input.id = 'temp-text-input';
         input.placeholder = '文字を入力\n(枠外クリックで確定)';
         input.rows = 1;
-
-        // Use the container for absolute positioning
         const container = document.getElementById('canvas-container');
-
-        // Calculate position in CSS pixels relative to the container
         const scaleX = canvas.offsetWidth / canvas.width;
-        const scaleY = canvas.offsetHeight / canvas.height;
-
         const fontSize = currentSize * 4 * scaleX;
-        input.style.position = 'absolute';
-        input.style.left = `${x * scaleX}px`;
-        input.style.top = `${y * scaleY}px`;
-        input.style.font = `${fontSize}px Inter, sans-serif`;
-        input.style.color = currentColor;
-        input.style.background = 'rgba(30, 30, 35, 0.9)';
-        input.style.border = '2px solid ' + currentColor;
-        input.style.borderRadius = '4px';
-        input.style.outline = 'none';
-        input.style.zIndex = '1000';
-        input.style.padding = '4px 8px';
-        input.style.minWidth = '4em';
-        input.style.resize = 'none';
-        input.style.overflow = 'hidden';
-        input.style.whiteSpace = 'pre';
-
+        Object.assign(input.style, {
+            position:'absolute', left:`${x*scaleX}px`, top:`${y*(canvas.offsetHeight/canvas.height)}px`,
+            font:`${fontSize}px Inter,sans-serif`, color:currentColor,
+            background:'rgba(30,30,35,0.9)', border:'2px solid '+currentColor,
+            borderRadius:'4px', outline:'none', zIndex:'1000',
+            padding:'4px 8px', minWidth:'4em', resize:'none', overflow:'hidden', whiteSpace:'pre'
+        });
         container.appendChild(input);
-
-        // 文字幅測定用の hidden span
-        const measurer = document.createElement('span');
-        measurer.style.cssText =
-            `position:absolute;visibility:hidden;white-space:pre;` +
-            `font:${fontSize}px Inter,sans-serif;padding:4px 8px;left:-9999px;top:-9999px;`;
-        document.body.appendChild(measurer);
-
-        function resizeInput() {
+        const msr = document.createElement('span');
+        msr.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${fontSize}px Inter,sans-serif;padding:4px 8px;left:-9999px;top:-9999px;`;
+        document.body.appendChild(msr);
+        function resize() {
             const lines = input.value ? input.value.split('\n') : ['\u00A0'];
             let maxW = 0;
-            lines.forEach(line => {
-                measurer.textContent = line || '\u00A0';
-                maxW = Math.max(maxW, measurer.offsetWidth);
-            });
-            input.style.width = (maxW + 24) + 'px';
+            lines.forEach(l => { msr.textContent = l||'\u00A0'; maxW = Math.max(maxW, msr.offsetWidth); });
+            input.style.width = (maxW+24)+'px';
             input.style.height = 'auto';
-            input.style.height = input.scrollHeight + 'px';
+            input.style.height = input.scrollHeight+'px';
         }
-
-        // Focus with a slight delay to ensure it's in the DOM
-        setTimeout(() => {
-            input.focus();
-            resizeInput();
-        }, 10);
-
-        input.addEventListener('input', resizeInput);
-
-        const handleFinish = () => {
+        setTimeout(() => { input.focus(); resize(); }, 10);
+        input.addEventListener('input', resize);
+        const finish = () => {
             if (input.value && input.value !== input.placeholder) {
-                drawText(input.value, x, y + (currentSize * 3));
-                saveUndoState(); // テキスト描画後に保存
+                // テキストをシェイプオブジェクトとして格納（移動可能）
+                shapes.push({ type:'text', text:input.value, x, y:y+currentSize*3, color:currentColor, size:currentSize });
+                composite(); saveUndoState();
             }
-            measurer.remove();
-            input.remove();
+            msr.remove(); input.remove();
         };
-
-        input.addEventListener('keydown', (e) => {
-            // Ctrl+Enter で確定
-            if (e.key === 'Enter' && e.ctrlKey) {
-                handleFinish();
-            }
-            if (e.key === 'Escape') {
-                measurer.remove();
-                input.remove();
-            }
+        input.addEventListener('keydown', e => {
+            if (e.key==='Enter' && e.ctrlKey) finish();
+            if (e.key==='Escape') { msr.remove(); input.remove(); }
         });
-
-        // Close on click outside (but not on the input itself)
-        const clickOutside = (e) => {
+        const outside = e => {
             if (e.target !== input) {
-                handleFinish();
-                document.removeEventListener('mousedown', clickOutside);
+                finish();
+                document.removeEventListener('mousedown', outside);
+                document.removeEventListener('touchstart', outside);
             }
         };
-        // Add listener after current event loop to avoid immediate trigger
-        setTimeout(() => document.addEventListener('mousedown', clickOutside), 10);
+        setTimeout(() => {
+            document.addEventListener('mousedown', outside);
+            document.addEventListener('touchstart', outside);
+        }, 50);
     }
 
-    // === Drawing Logic ===
-
-    function getMousePos(e) {
+    // === Pointer ===
+    function getPos(e) {
         const rect = canvas.getBoundingClientRect();
-        return {
-            x: (e.clientX - rect.left) * (canvas.width / rect.width),
-            y: (e.clientY - rect.top) * (canvas.height / rect.height)
-        };
+        const cx = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
+        const cy = (e.touches && e.touches.length) ? e.touches[0].clientY : e.clientY;
+        return { x:(cx-rect.left)*(canvas.width/rect.width), y:(cy-rect.top)*(canvas.height/rect.height) };
     }
 
     function startDraw(e) {
-        // Handle input abstraction (Mouse/Touch)
-        const isTouch = e.type.startsWith('touch');
-        const eventObj = isTouch ? e.touches[0] : e;
-        
-        const pos = getMousePos(eventObj);
-        
-        if (currentTool === 'text') {
-            addTextInput(pos.x, pos.y);
-            return;
+        const pos = getPos(e); lastPos = pos;
+        if (currentTool === 'text') { addTextInput(pos.x, pos.y); return; }
+        if (currentTool === 'move') {
+            const hit = hitTest(pos.x, pos.y);
+            selectedShape = hit || null; isDragging = !!hit;
+            dragStartX = pos.x; dragStartY = pos.y;
+            canvas.style.cursor = hit ? 'grabbing' : 'default';
+            composite(); return;
         }
-
-        isDrawing = true;
-        startX = pos.x;
-        startY = pos.y;
-        
-        // Save current canvas state to snapshot for real-time previews
-        snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        
-        ctx.beginPath();
-        ctx.lineWidth = currentSize;
-        ctx.strokeStyle = currentColor;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        
+        isDrawing = true; startX = pos.x; startY = pos.y;
         if (currentTool === 'pencil') {
-            ctx.moveTo(startX, startY);
+            currentPath = [{x:startX, y:startY}];
         }
     }
 
     function draw(e) {
-        if (!isDrawing) return;
-        
-        const isTouch = e.type.startsWith('touch');
-        const eventObj = isTouch ? e.touches[0] : e;
-
-        const pos = getMousePos(eventObj);
-        
-        // Restore snapshot before drawing preview (for line/circle)
-        if (currentTool !== 'pencil') {
-            ctx.putImageData(snapshot, 0, 0);
-        }
-
-        ctx.lineWidth = currentSize;
-        ctx.strokeStyle = currentColor;
-
-        if (currentTool === 'pencil') {
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
-        } else if (currentTool === 'line') {
-            ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(pos.x, pos.y);
-            ctx.stroke();
-        } else if (currentTool === 'circle') {
-            let rX = Math.abs(pos.x - startX);
-            let rY = Math.abs(pos.y - startY);
-            // Shift キー押下時は正円にする
-            if (e.shiftKey) {
-                const r = Math.max(rX, rY);
-                rX = r;
-                rY = r;
+        const pos = getPos(e);
+        if (currentTool === 'move') {
+            if (isDragging && selectedShape) {
+                moveShape(selectedShape, pos.x - dragStartX, pos.y - dragStartY);
+                dragStartX = pos.x; dragStartY = pos.y;
+                composite();
+            } else if (!isDragging) {
+                canvas.style.cursor = hitTest(pos.x, pos.y) ? 'move' : 'default';
             }
-            if (rX === 0 || rY === 0) return;
-            ctx.beginPath();
-            ctx.ellipse(startX, startY, rX, rY, 0, 0, 2 * Math.PI);
-            ctx.stroke();
+            return;
+        }
+        if (!isDrawing) return;
+        lastPos = pos;
+        if (currentTool === 'pencil') {
+            currentPath.push(pos);
+            composite({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
+        } else if (currentTool === 'line') {
+            composite({ type:'line', x1:startX, y1:startY, x2:pos.x, y2:pos.y, color:currentColor, size:currentSize });
+        } else if (currentTool === 'circle') {
+            let rx = Math.abs(pos.x-startX), ry = Math.abs(pos.y-startY);
+            if (e.shiftKey) { const r = Math.max(rx,ry); rx=r; ry=r; }
+            if (rx>0&&ry>0) composite({ type:'circle', cx:startX, cy:startY, rx, ry, color:currentColor, size:currentSize });
         }
     }
 
     function stopDraw() {
-        if (isDrawing) {
-            ctx.closePath();
-            isDrawing = false;
-            // 描画完了後にアンドゥ用の状態を保存
-            saveUndoState();
+        if (currentTool === 'move') {
+            if (isDragging && selectedShape) saveUndoState();
+            isDragging = false;
+            canvas.style.cursor = selectedShape ? 'move' : 'default';
+            return;
+        }
+        if (!isDrawing) return;
+        isDrawing = false;
+        if (currentTool === 'pencil') {
+            if (currentPath.length >= 2) {
+                shapes.push({ type:'pencil', points:[...currentPath], color:currentColor, size:currentSize });
+                composite(); saveUndoState();
+            }
+            currentPath = [];
+        } else if (currentTool === 'line') {
+            if (lastPos.x !== startX || lastPos.y !== startY) {
+                shapes.push({ type:'line', x1:startX, y1:startY, x2:lastPos.x, y2:lastPos.y, color:currentColor, size:currentSize });
+                composite(); saveUndoState();
+            }
+        } else if (currentTool === 'circle') {
+            const rx = Math.abs(lastPos.x-startX), ry = Math.abs(lastPos.y-startY);
+            if (rx>0&&ry>0) {
+                shapes.push({ type:'circle', cx:startX, cy:startY, rx, ry, color:currentColor, size:currentSize });
+                composite(); saveUndoState();
+            }
         }
     }
 
-    // === Image Handling ===
-
+    // === Image / Save / Clear ===
     function handleImage(file) {
         if (!file || !file.type.startsWith('image/')) return;
-
-        // ファイル名を表示
-        const filenameEl = document.getElementById('image-filename');
-        if (filenameEl) filenameEl.textContent = file.name;
-
+        const el = document.getElementById('image-filename');
+        if (el) el.textContent = file.name;
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = ev => {
             const img = new Image();
             img.onload = () => {
                 backgroundImage = img;
-                
-                // Keep original size so users can pan and draw in detail on mobile
-                // Only scale down if the image is astronomically large (e.g. over 3000px)
-                const MAX_DIM = 3000;
-                
-                let width = img.width;
-                let height = img.height;
-
-                if (width > MAX_DIM) {
-                    height *= MAX_DIM / width;
-                    width = MAX_DIM;
-                }
-                if (height > MAX_DIM) {
-                    width *= MAX_DIM / height;
-                    height = MAX_DIM;
-                }
-
-                canvas.width = img.width; // Use full size for quality
-                canvas.height = img.height;
-                
-                setZoom(1.0);
-                
-                ctx.drawImage(img, 0, 0);
-                
-                // 画像読み込み後にアンドゥスタックをリセットし、画像描画状態を初期スナップショットとして保存
-                undoStack = [];
-                saveUndoState();
-                
-                // Update UI
+                const MAX = 3000;
+                let w = img.width, h = img.height;
+                if (w>MAX){h*=MAX/w;w=MAX;} if (h>MAX){w*=MAX/h;h=MAX;}
+                canvas.width = baseCanvas.width = Math.round(w);
+                canvas.height = baseCanvas.height = Math.round(h);
+                baseCtx.drawImage(img, 0, 0, Math.round(w), Math.round(h));
+                shapes = []; selectedShape = null; currentPath = [];
+                setZoom(1.0); composite();
+                undoStack = []; saveUndoState();
                 dropZone.classList.add('hidden');
-                
-                // Reset ctx properties since canvas resize clears them
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
             };
-            img.src = e.target.result;
+            img.src = ev.target.result;
         };
         reader.readAsDataURL(file);
     }
 
     function saveImage() {
-        const link = document.createElement('a');
-        link.download = `paint-edit-${Date.now()}.png`;
-        link.href = canvas.toDataURL();
-        link.click();
+        composite();
+        const a = document.createElement('a');
+        a.download = `paint-edit-${Date.now()}.png`;
+        a.href = canvas.toDataURL(); a.click();
     }
 
     function clearCanvas() {
-        if (confirm('キャンバスをクリアしますか？')) {
-            if (backgroundImage) {
-                ctx.drawImage(backgroundImage, 0, 0);
-            } else {
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }
+        if (!confirm('キャンバスをクリアしますか？')) return;
+        if (backgroundImage) {
+            baseCtx.drawImage(backgroundImage, 0, 0, baseCanvas.width, baseCanvas.height);
+        } else {
+            baseCtx.fillStyle = '#ffffff';
+            baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
         }
+        shapes = []; selectedShape = null; currentPath = [];
+        composite(); saveUndoState();
     }
 
     // === Event Listeners ===
-
-    // Tools
     toolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             toolBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
-            const toolLabels = {
-                'btn-pencil': 'Pencil',
-                'btn-line': 'Line',
-                'btn-circle': 'Circle',
-                'btn-text': 'Text'
-            };
-
-            if (btn.id === 'btn-pencil') currentTool = 'pencil';
-            if (btn.id === 'btn-line') currentTool = 'line';
-            if (btn.id === 'btn-circle') currentTool = 'circle';
-            if (btn.id === 'btn-text') currentTool = 'text';
-
-            document.getElementById('tool-status').innerText = `Mode: ${toolLabels[btn.id]}`;
-
-            canvas.style.touchAction = 'none';
-            canvas.style.cursor = 'crosshair';
+            const map = {'btn-pencil':'pencil','btn-line':'line','btn-circle':'circle','btn-text':'text','btn-move':'move'};
+            const lbl = {pencil:'Pencil',line:'Line',circle:'Circle',text:'Text',move:'Move'};
+            currentTool = map[btn.id] || 'pencil';
+            document.getElementById('tool-status').innerText = `Mode: ${lbl[currentTool]}`;
+            if (currentTool === 'move') {
+                selectedShape = null; composite();
+                canvas.style.cursor = 'default';
+            } else {
+                canvas.style.touchAction = 'none';
+                canvas.style.cursor = 'crosshair';
+            }
         });
     });
 
-    // Colors
     colorBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             colorBtns.forEach(b => b.classList.remove('active'));
@@ -405,126 +388,73 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Brush Size
-    brushSizeInput.addEventListener('input', (e) => {
+    brushSizeInput.addEventListener('input', e => {
         currentSize = e.target.value;
         brushSizeVal.innerText = `${currentSize}px`;
     });
 
-    // Upload / Save / Clear
     btnUpload.addEventListener('click', () => imageInput.click());
-    imageInput.addEventListener('change', (e) => handleImage(e.target.files[0]));
-
+    imageInput.addEventListener('change', e => handleImage(e.target.files[0]));
     btnSave.addEventListener('click', saveImage);
     btnClear.addEventListener('click', clearCanvas);
     if (btnUndo) btnUndo.addEventListener('click', undo);
 
-    // Ctrl+Z でアンドゥ
-    document.addEventListener('keydown', (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-            e.preventDefault();
-            undo();
+    document.addEventListener('keydown', e => {
+        if ((e.ctrlKey||e.metaKey) && e.key==='z') { e.preventDefault(); undo(); }
+        if ((e.key==='Delete'||e.key==='Backspace') && selectedShape && currentTool==='move') {
+            shapes = shapes.filter(s => s !== selectedShape);
+            selectedShape = null; composite(); saveUndoState();
         }
     });
 
     // Drag & Drop
-    window.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        if (!backgroundImage) dropZone.classList.remove('hidden');
-    });
+    window.addEventListener('dragover', e => { e.preventDefault(); if (!backgroundImage) dropZone.classList.remove('hidden'); });
+    window.addEventListener('dragleave', () => { if (!backgroundImage) dropZone.classList.add('hidden'); });
+    window.addEventListener('drop', e => { e.preventDefault(); handleImage(e.dataTransfer.files[0]); });
+    dropZone.addEventListener('click', () => { if (!backgroundImage) imageInput.click(); });
 
-    window.addEventListener('dragleave', (e) => {
-        if (!backgroundImage) dropZone.classList.add('hidden');
-    });
-
-    window.addEventListener('drop', (e) => {
-        e.preventDefault();
-        handleImage(e.dataTransfer.files[0]);
-    });
-
-    // Click dropzone to upload if empty
-    dropZone.addEventListener('click', () => {
-        if (!backgroundImage) imageInput.click();
-    });
-
+    // Mouse
     canvas.addEventListener('mousedown', startDraw);
     canvas.addEventListener('mousemove', draw);
     window.addEventListener('mouseup', stopDraw);
 
-    // Unified Touch support
-    canvas.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 1) {
+    // Touch（1本指=描画/移動、2本指=ピンチズーム）
+    canvas.addEventListener('touchstart', e => {
+        if (e.touches.length === 1) { e.preventDefault(); startDraw(e); }
+        else if (e.touches.length === 2) {
             e.preventDefault();
-            startDraw(e);
-        } else if (e.touches.length === 2) {
-            e.preventDefault();
-            lastPinchDistance = getDistance(e.touches);
-            lastPinchCenter = getCenter(e.touches);
+            lastPinchDistance = getDist(e.touches);
+            lastPinchCenter   = getCenter(e.touches);
             if (isDrawing) stopDraw();
         }
-    }, { passive: false });
+    }, { passive:false });
 
-    canvas.addEventListener('touchmove', (e) => {
-        if (e.touches.length === 1) {
+    canvas.addEventListener('touchmove', e => {
+        if (e.touches.length === 1) { e.preventDefault(); draw(e); }
+        else if (e.touches.length === 2 && lastPinchDistance !== null) {
             e.preventDefault();
-            draw(e);
-        } else if (e.touches.length === 2 && lastPinchDistance !== null) {
-            e.preventDefault();
-            
-            const currentDistance = getDistance(e.touches);
-            const currentCenter = getCenter(e.touches);
-            
-            // Calculate deltas
-            const rawScaleDiff = currentDistance / lastPinchDistance;
-            const scaleDiff = 1 + (rawScaleDiff - 1.0) * 0.15; // スピードをもっと緩やかにする
-            const dx = currentCenter.x - lastPinchCenter.x;
-            const dy = currentCenter.y - lastPinchCenter.y;
-            
-            const canvasArea = document.querySelector('.canvas-area');
-            
-            // First adjust pan
-            canvasArea.scrollLeft -= dx;
-            canvasArea.scrollTop -= dy;
-            
-            // Then adjust zoom if changed significantly
-            if (Math.abs(scaleDiff - 1.0) > 0.002) {
-                setZoom(currentZoom * scaleDiff);
-            }
-            
-            // Update tracking
-            lastPinchCenter = currentCenter;
-            lastPinchDistance = currentDistance;
+            const d = getDist(e.touches), c = getCenter(e.touches);
+            const scale = 1 + (d / lastPinchDistance - 1) * 0.15;
+            const ca = document.querySelector('.canvas-area');
+            ca.scrollLeft -= c.x - lastPinchCenter.x;
+            ca.scrollTop  -= c.y - lastPinchCenter.y;
+            if (Math.abs(scale - 1) > 0.002) setZoom(currentZoom * scale);
+            lastPinchCenter = c; lastPinchDistance = d;
         }
-    }, { passive: false });
+    }, { passive:false });
 
-    canvas.addEventListener('touchend', (e) => {
-        if (e.touches.length < 2) {
-            lastPinchDistance = null;
-            lastPinchCenter = null;
-        }
-        if (e.touches.length === 0) {
-            stopDraw();
-        }
+    canvas.addEventListener('touchend', e => {
+        if (e.touches.length < 2) { lastPinchDistance = null; lastPinchCenter = null; }
+        if (e.touches.length === 0) stopDraw();
     });
 
-    // Desktop pinch to zoom equivalent (Ctrl + Wheel)
-    const canvasArea = document.querySelector('.canvas-area');
-    canvasArea.addEventListener('wheel', (e) => {
-        if (e.ctrlKey) {
-            e.preventDefault();
-            const zoomChange = e.deltaY > 0 ? 0.99 : 1.01; // 縮尺スピードをもっと緩やかに
-            setZoom(currentZoom * zoomChange);
-        }
-    }, { passive: false });
+    // Ctrl + Wheel ズーム（PC）
+    document.querySelector('.canvas-area').addEventListener('wheel', e => {
+        if (e.ctrlKey) { e.preventDefault(); setZoom(currentZoom * (e.deltaY > 0 ? 0.99 : 1.01)); }
+    }, { passive:false });
 
-    // Mobile View Toggle
-    function checkMobile() {
-        if (window.innerWidth <= 768) {
-            document.body.classList.add('mobile-view');
-        } else {
-            document.body.classList.remove('mobile-view');
-        }
-    }
+    // Mobile check
+    function checkMobile() { document.body.classList.toggle('mobile-view', window.innerWidth <= 768); }
     window.addEventListener('resize', checkMobile);
     checkMobile();
 });
