@@ -402,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Calculate deltas
             const rawScaleDiff = currentDistance / lastPinchDistance;
-            const scaleDiff = 1 + (rawScaleDiff - 1.0) * 0.4; // スピードを緩やかにする
+            const scaleDiff = 1 + (rawScaleDiff - 1.0) * 0.15; // スピードをもっと緩やかにする
             const dx = currentCenter.x - lastPinchCenter.x;
             const dy = currentCenter.y - lastPinchCenter.y;
             
@@ -438,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     canvasArea.addEventListener('wheel', (e) => {
         if (e.ctrlKey) {
             e.preventDefault();
-            const zoomChange = e.deltaY > 0 ? 0.97 : 1.03; // 縮尺スピードを緩やかに
+            const zoomChange = e.deltaY > 0 ? 0.99 : 1.01; // 縮尺スピードをもっと緩やかに
             setZoom(currentZoom * zoomChange);
         }
     }, { passive: false });
