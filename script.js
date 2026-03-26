@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnUpload = document.getElementById('btn-upload');
     const btnSave = document.getElementById('btn-save');
     const btnClear = document.getElementById('btn-clear');
+    const btnUndo = document.getElementById('btn-undo');
     
     // Tools & Colors
     const toolBtns = document.querySelectorAll('.tool-btn');
@@ -24,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let startScrollLeft = 0;
     let startScrollTop = 0;
     let snapshot = null; // Buffer to store previous canvas state for shape previews
+    let undoStack = []; // アンドゥ用の履歴スタック
+    const MAX_UNDO = 30; // 最大アンドゥ回数
     let backgroundImage = null; // To keep track of uploaded image
     let currentZoom = 1.0;
     let lastPinchDistance = null;
@@ -69,9 +72,36 @@ document.addEventListener('DOMContentLoaded', () => {
         // Initial Background
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // 初期状態をアンドゥスタックに保存
+        undoStack = [];
+        saveUndoState();
     }
 
     initCanvas();
+
+    // === Undo Logic ===
+    function saveUndoState() {
+        undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        if (undoStack.length > MAX_UNDO) {
+            undoStack.shift();
+        }
+        updateUndoBtn();
+    }
+
+    function undo() {
+        if (undoStack.length <= 1) return; // 最初の状態は消さない
+        undoStack.pop(); // 現在の状態を破棄
+        const prevState = undoStack[undoStack.length - 1];
+        ctx.putImageData(prevState, 0, 0);
+        updateUndoBtn();
+    }
+
+    function updateUndoBtn() {
+        if (btnUndo) {
+            btnUndo.disabled = undoStack.length <= 1;
+        }
+    }
 
     // === Text Tool Logic ===
     function drawText(text, x, y) {
@@ -91,20 +121,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const input = document.createElement('textarea');
         input.id = 'temp-text-input';
-        input.placeholder = '文字を入力...\n(枠外クリックで確定)';
-        
+        input.placeholder = '文字を入力\n(枠外クリックで確定)';
+        input.rows = 1;
+
         // Use the container for absolute positioning
         const container = document.getElementById('canvas-container');
-        
+
         // Calculate position in CSS pixels relative to the container
-        // Note: canvas style width/height might differ from its internal resolution
         const scaleX = canvas.offsetWidth / canvas.width;
         const scaleY = canvas.offsetHeight / canvas.height;
 
+        const fontSize = currentSize * 4 * scaleX;
         input.style.position = 'absolute';
         input.style.left = `${x * scaleX}px`;
         input.style.top = `${y * scaleY}px`;
-        input.style.font = `${currentSize * 4 * scaleX}px Inter, sans-serif`;
+        input.style.font = `${fontSize}px Inter, sans-serif`;
         input.style.color = currentColor;
         input.style.background = 'rgba(30, 30, 35, 0.9)';
         input.style.border = '2px solid ' + currentColor;
@@ -112,40 +143,56 @@ document.addEventListener('DOMContentLoaded', () => {
         input.style.outline = 'none';
         input.style.zIndex = '1000';
         input.style.padding = '4px 8px';
-        input.style.minWidth = '150px';
-        input.style.resize = 'both';
+        input.style.minWidth = '4em';
+        input.style.resize = 'none';
         input.style.overflow = 'hidden';
         input.style.whiteSpace = 'pre';
 
         container.appendChild(input);
-        
+
+        // 文字幅測定用の hidden span
+        const measurer = document.createElement('span');
+        measurer.style.cssText =
+            `position:absolute;visibility:hidden;white-space:pre;` +
+            `font:${fontSize}px Inter,sans-serif;padding:4px 8px;left:-9999px;top:-9999px;`;
+        document.body.appendChild(measurer);
+
+        function resizeInput() {
+            const lines = input.value ? input.value.split('\n') : ['\u00A0'];
+            let maxW = 0;
+            lines.forEach(line => {
+                measurer.textContent = line || '\u00A0';
+                maxW = Math.max(maxW, measurer.offsetWidth);
+            });
+            input.style.width = (maxW + 24) + 'px';
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        }
+
         // Focus with a slight delay to ensure it's in the DOM
         setTimeout(() => {
             input.focus();
-            input.style.height = 'auto';
-            input.style.height = input.scrollHeight + 'px';
+            resizeInput();
         }, 10);
 
-        input.addEventListener('input', () => {
-            input.style.height = 'auto';
-            input.style.height = input.scrollHeight + 'px';
-        });
+        input.addEventListener('input', resizeInput);
 
         const handleFinish = () => {
             if (input.value && input.value !== input.placeholder) {
-                // Adjust y for text baseline (fillText uses baseline by default)
-                // We add a bit of offset to match where the input was
                 drawText(input.value, x, y + (currentSize * 3));
+                saveUndoState(); // テキスト描画後に保存
             }
+            measurer.remove();
             input.remove();
         };
 
         input.addEventListener('keydown', (e) => {
-            // 改行を許可するため単体のEnterは確定させない
+            // Ctrl+Enter で確定
             if (e.key === 'Enter' && e.ctrlKey) {
                 handleFinish();
             }
             if (e.key === 'Escape') {
+                measurer.remove();
                 input.remove();
             }
         });
@@ -226,9 +273,17 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.lineTo(pos.x, pos.y);
             ctx.stroke();
         } else if (currentTool === 'circle') {
-            const radius = Math.sqrt(Math.pow(pos.x - startX, 2) + Math.pow(pos.y - startY, 2));
+            let rX = Math.abs(pos.x - startX);
+            let rY = Math.abs(pos.y - startY);
+            // Shift キー押下時は正円にする
+            if (e.shiftKey) {
+                const r = Math.max(rX, rY);
+                rX = r;
+                rY = r;
+            }
+            if (rX === 0 || rY === 0) return;
             ctx.beginPath();
-            ctx.arc(startX, startY, radius, 0, 2 * Math.PI);
+            ctx.ellipse(startX, startY, rX, rY, 0, 0, 2 * Math.PI);
             ctx.stroke();
         }
     }
@@ -237,6 +292,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDrawing) {
             ctx.closePath();
             isDrawing = false;
+            // 描画完了後にアンドゥ用の状態を保存
+            saveUndoState();
         }
     }
 
@@ -273,6 +330,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 setZoom(1.0);
                 
                 ctx.drawImage(img, 0, 0);
+                
+                // 画像読み込み後にアンドゥスタックをリセットし、画像描画状態を初期スナップショットとして保存
+                undoStack = [];
+                saveUndoState();
                 
                 // Update UI
                 dropZone.classList.add('hidden');
@@ -352,6 +413,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnSave.addEventListener('click', saveImage);
     btnClear.addEventListener('click', clearCanvas);
+    if (btnUndo) btnUndo.addEventListener('click', undo);
+
+    // Ctrl+Z でアンドゥ
+    document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            e.preventDefault();
+            undo();
+        }
+    });
 
     // Drag & Drop
     window.addEventListener('dragover', (e) => {

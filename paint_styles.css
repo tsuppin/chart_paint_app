@@ -60,6 +60,8 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
 .action-btn { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem; }
 .upload-btn { background: rgba(46,204,113,0.2); color: #2ecc71; border: 1px solid #2ecc71; }
 .save-btn { background: var(--accent-color); color: #fff; }
+.undo-btn { background: rgba(230,126,34,0.2); color: #e67e22; border: 1px solid #e67e22; transition: opacity 0.2s; }
+.undo-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .clear-btn { background: rgba(255,77,77,0.2); color: #ff4d4d; border: 1px solid #ff4d4d; }
 
 .canvas-area { 
