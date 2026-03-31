@@ -427,8 +427,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Touch（1本指=描画/移動、2本指=ピンチズーム）
     canvas.addEventListener('touchstart', e => {
-        if (e.touches.length === 1) { e.preventDefault(); startDraw(e); }
-        else if (e.touches.length === 2) {
+        if (e.touches.length === 1) {
+            if (currentTool === 'move') {
+                // まずヒットテストして、シェイプをつかんだ場合のみスクロールをブロック
+                startDraw(e);
+                if (isDragging) e.preventDefault(); // シェイプあり → スクロール無効
+                // シェイプなし → preventDefault しない → ネイティブスクロール委譲
+                return;
+            }
+            // 描画ツールはスクロール完全ブロック
+            e.preventDefault();
+            startDraw(e);
+        } else if (e.touches.length === 2) {
             e.preventDefault();
             lastPinchDistance = getDist(e.touches);
             lastPinchCenter   = getCenter(e.touches);
@@ -437,8 +447,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }, { passive:false });
 
     canvas.addEventListener('touchmove', e => {
-        if (e.touches.length === 1) { e.preventDefault(); draw(e); }
-        else if (e.touches.length === 2 && lastPinchDistance !== null) {
+        if (e.touches.length === 1) {
+            if (currentTool === 'move' && !(isDragging && selectedShape)) {
+                // シェイプをドラッグ中でない → ネイティブスクロールに委ねる
+                return;
+            }
+            e.preventDefault();
+            draw(e);
+        } else if (e.touches.length === 2 && lastPinchDistance !== null) {
             e.preventDefault();
             const d = getDist(e.touches), c = getCenter(e.touches);
             const scale = 1 + (d / lastPinchDistance - 1) * 0.15;

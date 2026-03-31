@@ -130,8 +130,12 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     padding: 1.5rem; 
     overflow: auto; 
     position: relative; 
-    display: flex; /* keep flex to allow centering if small */
+    display: flex;
     touch-action: pan-x pan-y; /* キャンバスエリアはスクロール可能 */
+    /* スクロールを親に伝播させない */
+    overscroll-behavior: contain;
+    /* GPUアクセラレーション */
+    will-change: scroll-position;
 }
 
 .tool-status {
