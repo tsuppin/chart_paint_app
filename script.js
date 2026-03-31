@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 5;
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
+    let rafPending = false; // requestAnimationFrame 管理フラグ
 
     // shapes 配列: 全描画オブジェクトを格納
     // pencil: { type:'pencil', points:[{x,y}...], color, size }
@@ -265,9 +266,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const pos = getPos(e);
         if (currentTool === 'move') {
             if (isDragging && selectedShape) {
-                moveShape(selectedShape, pos.x - dragStartX, pos.y - dragStartY);
+                const dx = pos.x - dragStartX;
+                const dy = pos.y - dragStartY;
                 dragStartX = pos.x; dragStartY = pos.y;
-                composite();
+                moveShape(selectedShape, dx, dy);
+                if (!rafPending) {
+                    rafPending = true;
+                    requestAnimationFrame(() => { composite(); rafPending = false; });
+                }
             } else if (!isDragging) {
                 canvas.style.cursor = hitTest(pos.x, pos.y) ? 'move' : 'default';
             }
@@ -373,6 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentTool === 'move') {
                 selectedShape = null; composite();
                 canvas.style.cursor = 'default';
+                canvas.style.touchAction = 'none'; // 移動ツールも pan は不要
             } else {
                 canvas.style.touchAction = 'none';
                 canvas.style.cursor = 'crosshair';

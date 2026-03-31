@@ -12,64 +12,67 @@
 <body>
     <div class="app-container">
         <aside class="sidebar glass">
+            <!-- 1段目: 描画ツール + カラーパレット + ファイル名 -->
             <div class="toolbar-row">
                 <section class="tool-section">
-                <div class="tool-grid">
-                    <button id="btn-pencil" class="tool-btn active" title="フリーハンド">
-                        <i class="fas fa-pencil-alt"></i>
-                    </button>
-                    <button id="btn-line" class="tool-btn" title="直線">
-                        <i class="fas fa-minus"></i>
-                    </button>
-                    <button id="btn-circle" class="tool-btn" title="円">
-                        <i class="far fa-circle"></i>
-                    </button>
-                    <button id="btn-text" class="tool-btn" title="テキスト">
-                        <i class="fas fa-font"></i>
-                    </button>
-                    <button id="btn-move" class="tool-btn" title="直線・円を移動 (削除: Delete)">
-                        <i class="fas fa-arrows-alt"></i>
-                    </button>
-                </div>
-            </section>
+                    <div class="tool-grid">
+                        <button id="btn-pencil" class="tool-btn active" title="フリーハンド">
+                            <i class="fas fa-pencil-alt"></i>
+                        </button>
+                        <button id="btn-line" class="tool-btn" title="直線">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <button id="btn-circle" class="tool-btn" title="円">
+                            <i class="far fa-circle"></i>
+                        </button>
+                        <button id="btn-text" class="tool-btn" title="テキスト">
+                            <i class="fas fa-font"></i>
+                        </button>
+                        <button id="btn-move" class="tool-btn" title="移動 (削除: Delete)">
+                            <i class="fas fa-arrows-alt"></i>
+                        </button>
+                    </div>
+                </section>
 
-            <section class="color-section">
-                <div class="color-palette">
-                    <button class="color-btn active" data-color="#ff4d4d" title="赤" style="background-color: #ff4d4d;"></button>
-                    <button class="color-btn" data-color="#2ecc71" title="緑" style="background-color: #2ecc71;"></button>
-                    <button class="color-btn" data-color="#3498db" title="青" style="background-color: #3498db;"></button>
-                    <button class="color-btn" data-color="#9b59b6" title="紫" style="background-color: #9b59b6;"></button>
-                    <button class="color-btn" data-color="#e67e22" title="オレンジ" style="background-color: #e67e22;"></button>
-                    <button class="color-btn" data-color="#f1c40f" title="黄色" style="background-color: #f1c40f;"></button>
-                    <button class="color-btn" data-color="#ffffff" title="白" style="background-color: #ffffff;"></button>
-                    <button class="color-btn" data-color="#1e1e1e" title="黒" style="background-color: #1e1e1e;"></button>
-                </div>
-            </section>
+                <section class="color-section">
+                    <div class="color-palette">
+                        <button class="color-btn active" data-color="#ff4d4d" title="赤" style="background-color: #ff4d4d;"></button>
+                        <button class="color-btn" data-color="#2ecc71" title="緑" style="background-color: #2ecc71;"></button>
+                        <button class="color-btn" data-color="#3498db" title="青" style="background-color: #3498db;"></button>
+                        <button class="color-btn" data-color="#9b59b6" title="紫" style="background-color: #9b59b6;"></button>
+                        <button class="color-btn" data-color="#e67e22" title="オレンジ" style="background-color: #e67e22;"></button>
+                        <button class="color-btn" data-color="#f1c40f" title="黄色" style="background-color: #f1c40f;"></button>
+                        <button class="color-btn" data-color="#ffffff" title="白" style="background-color: #ffffff;"></button>
+                        <button class="color-btn" data-color="#1e1e1e" title="黒" style="background-color: #1e1e1e;"></button>
+                    </div>
+                </section>
+
+                <div id="image-filename" class="image-filename"></div>
             </div>
 
+            <!-- 2段目: ブラシサイズ + アクションボタン -->
             <div class="toolbar-row">
                 <section class="brush-section">
-                <input type="range" id="brush-size" min="1" max="50" value="5" title="ブラシの太さ">
-                <span id="brush-size-val">5px</span>
-            </section>
+                    <input type="range" id="brush-size" min="1" max="50" value="5" title="ブラシの太さ">
+                    <span id="brush-size-val">5px</span>
+                </section>
 
-            <section class="action-section">
-                <input type="file" id="image-upload" accept="image/*" hidden>
-                <button id="btn-upload" class="action-btn upload-btn" title="画像をアップロード">
-                    画
-                </button>
-                <button id="btn-save" class="action-btn save-btn" title="保存する">
-                    保
-                </button>
-                <button id="btn-undo" class="action-btn undo-btn" title="元に戻す (Ctrl+Z)" disabled>
-                    <i class="fas fa-undo"></i>
-                </button>
-                <button id="btn-clear" class="action-btn clear-btn" title="クリア">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </section>
+                <section class="action-section">
+                    <input type="file" id="image-upload" accept="image/*" hidden>
+                    <button id="btn-upload" class="action-btn upload-btn" title="画像をアップロード">
+                        <i class="fas fa-image"></i> 画像
+                    </button>
+                    <button id="btn-save" class="action-btn save-btn" title="保存する">
+                        <i class="fas fa-download"></i> 保存
+                    </button>
+                    <button id="btn-undo" class="action-btn undo-btn" title="元に戻す (Ctrl+Z)" disabled>
+                        <i class="fas fa-undo"></i>
+                    </button>
+                    <button id="btn-clear" class="action-btn clear-btn" title="クリア">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </section>
             </div>
-            <div id="image-filename" class="image-filename"></div>
         </aside>
 
         <main class="canvas-area">
