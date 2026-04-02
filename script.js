@@ -23,7 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let rafPending = false; // requestAnimationFrame 管理フラグ
 
     // Panning & Momentum (Transform-based)
-    let isPanning = false, lastTouchX = 0, lastTouchY = 0, lastTouchTime = 0;
+    let isPanning = false; 
+    let lastMouseX = 0, lastMouseY = 0; // マウスパン用
+    let lastTouchX = 0, lastTouchY = 0, lastTouchTime = 0;
     let velX = 0, velY = 0, momentumID = null;
     let moveHistory = [];
     let viewX = 0, viewY = 0, viewScale = 1.0;
@@ -74,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentZoom = viewScale = 1.0; viewX = 0; viewY = 0;
         applyTransform();
         undoStack = []; saveUndoState();
+        composite(); 
     }
     initCanvas();
 
@@ -268,6 +271,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function startDraw(e) {
         const pos = getPos(e); lastPos = pos;
+        
+        // --- PC/マウス操作のパン開始 ---
+        // ミドルクリックまたは移動ツールで背景をクリックした場合
+        if (e.button !== undefined) {
+             if (e.button === 1 || (currentTool === 'move' && e.button === 0)) {
+                const hit = (e.button === 1) ? null : hitTest(pos.x, pos.y);
+                if (!hit) {
+                    isPanning = true;
+                    lastMouseX = e.clientX;
+                    lastMouseY = e.clientY;
+                    canvas.style.cursor = 'move';
+                    return;
+                }
+            }
+        }
+
         if (currentTool === 'text') { addTextInput(pos.x, pos.y); return; }
         if (currentTool === 'move') {
             const hit = hitTest(pos.x, pos.y);
@@ -283,6 +302,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function draw(e) {
+        // マウスによるパンニング (e.button または MouseEvent 判定)
+        if (isPanning && e instanceof MouseEvent) {
+            const dx = e.clientX - lastMouseX;
+            const dy = e.clientY - lastMouseY;
+            viewX += dx; viewY += dy;
+            lastMouseX = e.clientX; lastMouseY = e.clientY;
+            applyTransform();
+            return;
+        }
+
         const pos = getPos(e);
         if (currentTool === 'move') {
             if (isDragging && selectedShape) {
@@ -314,6 +343,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function stopDraw() {
+        if (isPanning) {
+            isPanning = false;
+            canvas.style.cursor = (currentTool === 'move') ? 'default' : 'crosshair';
+            return;
+        }
         if (currentTool === 'move') {
             if (isDragging && selectedShape) saveUndoState();
             isDragging = false;
@@ -359,7 +393,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 canvas.height = baseCanvas.height = Math.round(h);
                 baseCtx.drawImage(img, 0, 0, Math.round(w), Math.round(h));
                 shapes = []; selectedShape = null; currentPath = [];
+                // ビューをリセット
+                viewScale = currentZoom = 1.0; viewX = 0; viewY = 0;
+                velX = 0; velY = 0; stopMomentum(); // 慣性もリセット
+                applyTransform();
                 undoStack = []; saveUndoState();
+                composite();
                 dropZone.classList.add('hidden');
             };
             img.src = ev.target.result;
@@ -444,9 +483,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Drag & Drop
     window.addEventListener('dragover', e => { e.preventDefault(); if (!backgroundImage) dropZone.classList.remove('hidden'); });
-    window.addEventListener('dragleave', () => { if (!backgroundImage) dropZone.classList.remove('hidden'); });
-    window.addEventListener('drop', e => { e.preventDefault(); handleImage(e.dataTransfer.files[0]); });
-    dropZone.addEventListener('click', () => { if (!backgroundImage) imageInput.click(); });
+    window.addEventListener('dragleave', e => { 
+        if (e.relatedTarget === null || e.relatedTarget === undefined) {
+             // 画面外に出た場合のみ表示（オプション）
+        }
+    });
+    window.addEventListener('drop', e => { 
+        e.preventDefault(); 
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleImage(e.dataTransfer.files[0]); 
+        }
+    });
+    dropZone.addEventListener('click', (e) => { 
+        e.stopPropagation();
+        imageInput.click(); 
+    });
 
     // Mouse
     canvas.addEventListener('mousedown', startDraw);
@@ -553,8 +604,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = getDist(e.touches), c = getCenter(e.touches);
             const scale = 1 + (d / lastPinchDistance - 1) * 0.25;
             
+            // 重要: 2本指の中心点の動きをパンニング（移動）として反映
             viewX += c.x - lastPinchCenter.x;
             viewY += c.y - lastPinchCenter.y;
+            
             setZoom(viewScale * scale, c.x, c.y);
             
             lastPinchCenter = c; lastPinchDistance = d;
@@ -570,12 +623,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.touches.length === 0) { isPanning = false; stopDraw(); }
     });
 
-    // Wheel Zoom
+    // Wheel Zoom & Pan (2-finger touchpad support on PC)
     document.querySelector('.canvas-area').addEventListener('wheel', e => {
+        e.preventDefault();
         if (e.ctrlKey) {
-            e.preventDefault();
+            // Zoom (Pinch or Ctrl+Wheel)
             const scale = e.deltaY > 0 ? 0.95 : 1.05;
             setZoom(viewScale * scale, e.clientX, e.clientY);
+        } else {
+            // Pan (Scroll or 2-finger swipe on trackpad)
+            // deltaX/Y を使って表示位置を移動
+            viewX -= e.deltaX;
+            viewY -= e.deltaY;
+            applyTransform();
         }
     }, { passive:false });
 
