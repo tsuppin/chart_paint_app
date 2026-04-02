@@ -12,7 +12,7 @@
 <body>
     <div class="app-container">
         <aside class="sidebar glass">
-            <!-- 1段目: 描画ツール + カラーパレット + ファイル名 -->
+            <!-- 1段目: 描画ツール + カラーパレット -->
             <div class="toolbar-row">
                 <section class="tool-section">
                     <div class="tool-grid">
@@ -46,14 +46,14 @@
                         <button class="color-btn" data-color="#1e1e1e" title="黒" style="background-color: #1e1e1e;"></button>
                     </div>
                 </section>
-
-                <div id="image-filename" class="image-filename"></div>
             </div>
 
             <!-- 2段目: ブラシサイズ + アクションボタン -->
             <div class="toolbar-row">
                 <section class="brush-section">
+                    <button id="btn-brush-dec" class="size-adj-btn" title="ブラシを小さく"><i class="fas fa-minus"></i></button>
                     <input type="range" id="brush-size" min="1" max="50" value="5" title="ブラシの太さ">
+                    <button id="btn-brush-inc" class="size-adj-btn" title="ブラシを大きく"><i class="fas fa-plus"></i></button>
                     <span id="brush-size-val">5px</span>
                 </section>
 

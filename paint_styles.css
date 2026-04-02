@@ -86,8 +86,24 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
 }
 .color-btn.active { border-color: #fff; }
 
-.brush-section { flex-direction: row; align-items: center; gap: 0.5rem; min-width: 140px; flex-shrink: 0; }
-#brush-size { flex-grow: 1; min-width: 80px; }
+.brush-section { flex-direction: row; align-items: center; gap: 0.3rem; min-width: 180px; flex-shrink: 0; }
+#brush-size { flex-grow: 1; min-width: 60px; }
+
+.size-adj-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    transition: background 0.2s;
+}
+.size-adj-btn:active { background: var(--accent-color); color: #fff; }
 
 /* アクションボタン群は右寄せ。2段目の右端に配置 */
 .action-section { flex-shrink: 0; display: flex; gap: 0.6rem; margin-left: auto; }
@@ -171,28 +187,29 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
         padding: 0.4rem 0.6rem;
         gap: 0.35rem;
     }
-    .toolbar-row { gap: 0.5rem; }
-
-    /* ツールボタン: やや小さく */
-    .tool-btn { width: 36px; height: 36px; font-size: 0.9rem; }
-
-    /* カラーボタン: コンパクト */
-    .color-btn { width: 24px; height: 24px; }
-
-    /* ブラシスライダー */
-    .brush-section { min-width: 90px; gap: 0.4rem; }
-    #brush-size-val { font-size: 0.7rem; }
-
-    /* アクションボタン */
-    .action-btn { font-size: 0.7rem; padding: 0.35rem 0.55rem; gap: 0.3rem; }
-
-    .canvas-area { padding: 0.4rem; }
-
-    /* ファイル名はツールバー行内に収める */
-    .image-filename {
-        font-size: 0.55rem;
-        max-width: 120px;
+    .toolbar-row { 
+        gap: 0.3rem; 
+        justify-content: space-between; 
+        padding-bottom: 2px;
     }
+
+    /* ツールボタン: さらにコンパクトに */
+    .tool-btn { width: 32px; height: 32px; font-size: 0.8rem; border-radius: 6px; }
+
+    /* カラーボタン: さらにコンパクトに */
+    .color-btn { width: 20px; height: 20px; }
+    .color-palette { gap: 0.3rem; }
+
+    /* ブラシ調整セクション */
+    .brush-section { min-width: 130px; gap: 0.2rem; }
+    .size-adj-btn { width: 24px; height: 24px; font-size: 0.6rem; }
+    #brush-size-val { font-size: 0.65rem; min-width: 2.2em; display: inline-block; }
+
+    /* アクションボタン: さらにコンパクトに */
+    .action-btn { font-size: 0.65rem; padding: 0.3rem 0.45rem; gap: 0.2rem; }
+    .action-section { gap: 0.4rem; }
+
+    .canvas-area { padding: 0.2rem; }
 }
 
 /* 極小画面 */

@@ -22,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPath = []; // ペンシル描画中の点列
     let rafPending = false; // requestAnimationFrame 管理フラグ
 
+    // Panning & Momentum
+    let isPanning = false, lastTouchX = 0, lastTouchY = 0, lastTouchTime = 0;
+    let velX = 0, velY = 0, momentumID = null;
+
     // shapes 配列: 全描画オブジェクトを格納
     // pencil: { type:'pencil', points:[{x,y}...], color, size }
     // line:   { type:'line',   x1,y1,x2,y2, color, size }
@@ -70,8 +74,8 @@ document.addEventListener('DOMContentLoaded', () => {
         tc.save();
         tc.lineWidth = s.size;
         tc.strokeStyle = s.color;
-        tc.lineCap = 'round';
-        tc.lineJoin = 'round';
+        tc.lineCap = 'square';
+        tc.lineJoin = 'miter';
         if (sel) { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
 
         if (s.type === 'pencil') {
@@ -396,8 +400,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     brushSizeInput.addEventListener('input', e => {
-        currentSize = e.target.value;
+        currentSize = parseInt(e.target.value);
         brushSizeVal.innerText = `${currentSize}px`;
+    });
+
+    document.getElementById('btn-brush-dec').addEventListener('click', () => {
+        brushSizeInput.value = Math.max(1, parseInt(brushSizeInput.value) - 1);
+        brushSizeInput.dispatchEvent(new Event('input'));
+    });
+    document.getElementById('btn-brush-inc').addEventListener('click', () => {
+        brushSizeInput.value = Math.min(50, parseInt(brushSizeInput.value) + 1);
+        brushSizeInput.dispatchEvent(new Event('input'));
     });
 
     btnUpload.addEventListener('click', () => imageInput.click());
@@ -425,17 +438,45 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.addEventListener('mousemove', draw);
     window.addEventListener('mouseup', stopDraw);
 
-    // Touch（1本指=描画/移動、2本指=ピンチズーム）
+    // --- Momentum Panning ---
+    function stopMomentum() { if (momentumID) { cancelAnimationFrame(momentumID); momentumID = null; } }
+    function startMomentum() {
+        if (Math.abs(velX) < 1 && Math.abs(velY) < 1) return;
+        const ca = document.querySelector('.canvas-area');
+        ca.scrollLeft -= velX;
+        ca.scrollTop  -= velY;
+        velX *= 0.95; velY *= 0.95;
+        momentumID = requestAnimationFrame(startMomentum);
+    }
+
+    // --- Touch（1本指=描画/移動/パン、2本指=ピンチズーム） ---
     canvas.addEventListener('touchstart', e => {
+        stopMomentum();
         if (e.touches.length === 1) {
+            const t = e.touches[0];
+            lastTouchX = t.clientX; lastTouchY = t.clientY;
+            lastTouchTime = Date.now();
+            velX = 0; velY = 0;
+
             if (currentTool === 'move') {
-                // まずヒットテストして、シェイプをつかんだ場合のみスクロールをブロック
-                startDraw(e);
-                if (isDragging) e.preventDefault(); // シェイプあり → スクロール無効
-                // シェイプなし → preventDefault しない → ネイティブスクロール委譲
+                const pos = getPos(e);
+                const hit = hitTest(pos.x, pos.y);
+                if (hit) {
+                    selectedShape = hit; isDragging = true;
+                    dragStartX = pos.x; dragStartY = pos.y;
+                    canvas.style.cursor = 'grabbing';
+                    composite();
+                    e.preventDefault();
+                } else {
+                    // 背景タッチならパンモードへ
+                    selectedShape = null; isDragging = false;
+                    isPanning = true;
+                    composite();
+                    // e.preventDefault() はしない（必要に応じて move で呼ぶ）
+                }
                 return;
             }
-            // 描画ツールはスクロール完全ブロック
+            // 描画ツール
             e.preventDefault();
             startDraw(e);
         } else if (e.touches.length === 2) {
@@ -443,17 +484,40 @@ document.addEventListener('DOMContentLoaded', () => {
             lastPinchDistance = getDist(e.touches);
             lastPinchCenter   = getCenter(e.touches);
             if (isDrawing) stopDraw();
+            isPanning = false; isDragging = false;
         }
     }, { passive:false });
 
     canvas.addEventListener('touchmove', e => {
         if (e.touches.length === 1) {
-            if (currentTool === 'move' && !(isDragging && selectedShape)) {
-                // シェイプをドラッグ中でない → ネイティブスクロールに委ねる
+            const t = e.touches[0];
+            const now = Date.now();
+            const dt = now - lastTouchTime;
+            const dx = t.clientX - lastTouchX;
+            const dy = t.clientY - lastTouchY;
+
+            if (currentTool === 'move') {
+                if (isDragging && selectedShape) {
+                    e.preventDefault();
+                    draw(e); // 通常のシェイプ移動
+                } else if (isPanning) {
+                    e.preventDefault();
+                    const ca = document.querySelector('.canvas-area');
+                    ca.scrollLeft -= dx;
+                    ca.scrollTop  -= dy;
+                    // 速度計算（慣性用）
+                    if (dt > 0) {
+                        velX = (dx / dt) * 15; velY = (dy / dt) * 15;
+                    }
+                }
+                lastTouchX = t.clientX; lastTouchY = t.clientY;
+                lastTouchTime = now;
                 return;
             }
+
             e.preventDefault();
             draw(e);
+            lastTouchX = t.clientX; lastTouchY = t.clientY;
         } else if (e.touches.length === 2 && lastPinchDistance !== null) {
             e.preventDefault();
             const d = getDist(e.touches), c = getCenter(e.touches);
@@ -467,8 +531,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }, { passive:false });
 
     canvas.addEventListener('touchend', e => {
+        if (isPanning) {
+            isPanning = false;
+            startMomentum();
+        }
         if (e.touches.length < 2) { lastPinchDistance = null; lastPinchCenter = null; }
-        if (e.touches.length === 0) stopDraw();
+        if (e.touches.length === 0) { isPanning = false; stopDraw(); }
     });
 
     // Ctrl + Wheel ズーム（PC）
