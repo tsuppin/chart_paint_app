@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Panning & Momentum
     let isPanning = false, lastTouchX = 0, lastTouchY = 0, lastTouchTime = 0;
     let velX = 0, velY = 0, momentumID = null;
+    let moveHistory = []; // 速度計算用の移動履歴 [{x,y,t}]
 
     // shapes 配列: 全描画オブジェクトを格納
     // pencil: { type:'pencil', points:[{x,y}...], color, size }
@@ -201,7 +202,8 @@ document.addEventListener('DOMContentLoaded', () => {
             font:`${fontSize}px Inter,sans-serif`, color:currentColor,
             background:'rgba(30,30,35,0.9)', border:'2px solid '+currentColor,
             borderRadius:'4px', outline:'none', zIndex:'1000',
-            padding:'4px 8px', minWidth:'4em', resize:'none', overflow:'hidden', whiteSpace:'pre'
+            padding:'4px 8px', minWidth:'4em', resize:'none', overflow:'hidden', whiteSpace:'pre',
+            willChange: 'transform'
         });
         container.appendChild(input);
         const msr = document.createElement('span');
@@ -441,12 +443,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Momentum Panning ---
     function stopMomentum() { if (momentumID) { cancelAnimationFrame(momentumID); momentumID = null; } }
     function startMomentum() {
-        if (Math.abs(velX) < 1 && Math.abs(velY) < 1) return;
+        if (Math.abs(velX) < 0.2 && Math.abs(velY) < 0.2) {
+            velX = 0; velY = 0; return;
+        }
         const ca = document.querySelector('.canvas-area');
         ca.scrollLeft -= velX;
         ca.scrollTop  -= velY;
-        velX *= 0.95; velY *= 0.95;
+        velX *= 0.97; velY *= 0.97; // 減衰率を調整（0.95 -> 0.97 でより伸びる）
         momentumID = requestAnimationFrame(startMomentum);
+    }
+
+    function updateVelocity(dx, dy, dt) {
+        const now = Date.now();
+        moveHistory.push({ dx, dy, dt, t: now });
+        // 直近100msのデータのみ維持
+        moveHistory = moveHistory.filter(m => now - m.t < 100);
+        if (moveHistory.length > 0) {
+            const sumX = moveHistory.reduce((s, m) => s + m.dx, 0);
+            const sumY = moveHistory.reduce((s, m) => s + m.dy, 0);
+            const sumT = moveHistory.reduce((s, m) => s + m.dt, 0);
+            if (sumT > 0) {
+                // 1フレーム(約16.6ms)あたりの移動量に換算
+                velX = (sumX / sumT) * 16.6;
+                velY = (sumY / sumT) * 16.6;
+            }
+        }
     }
 
     // --- Touch（1本指=描画/移動/パン、2本指=ピンチズーム） ---
@@ -456,7 +477,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const t = e.touches[0];
             lastTouchX = t.clientX; lastTouchY = t.clientY;
             lastTouchTime = Date.now();
-            velX = 0; velY = 0;
+            velX = 0; velY = 0; moveHistory = [];
 
             if (currentTool === 'move') {
                 const pos = getPos(e);
@@ -505,10 +526,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const ca = document.querySelector('.canvas-area');
                     ca.scrollLeft -= dx;
                     ca.scrollTop  -= dy;
-                    // 速度計算（慣性用）
-                    if (dt > 0) {
-                        velX = (dx / dt) * 15; velY = (dy / dt) * 15;
-                    }
+                    updateVelocity(dx, dy, dt);
                 }
                 lastTouchX = t.clientX; lastTouchY = t.clientY;
                 lastTouchTime = now;

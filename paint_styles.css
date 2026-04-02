@@ -175,6 +175,8 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     border-radius: 4px; 
     position: relative; 
     margin: auto;
+    will-change: transform; /* GPU accelerated */
+    transform: translateZ(0); /* Force layer */
 }
 #main-canvas { display: block; }
 
