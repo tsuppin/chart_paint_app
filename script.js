@@ -22,10 +22,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPath = []; // ペンシル描画中の点列
     let rafPending = false; // requestAnimationFrame 管理フラグ
 
-    // Panning & Momentum
+    // Panning & Momentum (Transform-based)
     let isPanning = false, lastTouchX = 0, lastTouchY = 0, lastTouchTime = 0;
     let velX = 0, velY = 0, momentumID = null;
-    let moveHistory = []; // 速度計算用の移動履歴 [{x,y,t}]
+    let moveHistory = [];
+    let viewX = 0, viewY = 0, viewScale = 1.0;
 
     // shapes 配列: 全描画オブジェクトを格納
     // pencil: { type:'pencil', points:[{x,y}...], color, size }
@@ -39,12 +40,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let backgroundImage = null, currentZoom = 1.0;
     let lastPinchDistance = null, lastPinchCenter = null;
 
-    // === Zoom ===
-    function setZoom(z) {
-        currentZoom = Math.max(0.1, Math.min(5.0, z));
-        canvas.style.width  = `${canvas.width  * currentZoom}px`;
-        canvas.style.height = `${canvas.height * currentZoom}px`;
+    // === Transform ===
+    function applyTransform() {
+        const container = document.getElementById('canvas-container');
+        if (container) container.style.transform = `translate3d(${viewX}px, ${viewY}px, 0) scale(${viewScale})`;
     }
+
+    function setZoom(z, centerX, centerY) {
+        const oldS = viewScale;
+        viewScale = Math.max(0.1, Math.min(8.0, z));
+        currentZoom = viewScale; // 同期
+        if (centerX !== undefined && centerY !== undefined) {
+            // スケール変更に合わせてオフセットを調整（焦点固定）
+            viewX -= (centerX - viewX) * (viewScale / oldS - 1);
+            viewY -= (centerY - viewY) * (viewScale / oldS - 1);
+        }
+        applyTransform();
+    }
+
     const getDist   = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
     const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
@@ -58,7 +71,8 @@ document.addEventListener('DOMContentLoaded', () => {
         baseCtx.fillStyle = '#ffffff';
         baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
         shapes = []; selectedShape = null; currentPath = [];
-        setZoom(1.0); composite();
+        currentZoom = viewScale = 1.0; viewX = 0; viewY = 0;
+        applyTransform();
         undoStack = []; saveUndoState();
     }
     initCanvas();
@@ -345,7 +359,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 canvas.height = baseCanvas.height = Math.round(h);
                 baseCtx.drawImage(img, 0, 0, Math.round(w), Math.round(h));
                 shapes = []; selectedShape = null; currentPath = [];
-                setZoom(1.0); composite();
                 undoStack = []; saveUndoState();
                 dropZone.classList.add('hidden');
             };
@@ -431,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Drag & Drop
     window.addEventListener('dragover', e => { e.preventDefault(); if (!backgroundImage) dropZone.classList.remove('hidden'); });
-    window.addEventListener('dragleave', () => { if (!backgroundImage) dropZone.classList.add('hidden'); });
+    window.addEventListener('dragleave', () => { if (!backgroundImage) dropZone.classList.remove('hidden'); });
     window.addEventListener('drop', e => { e.preventDefault(); handleImage(e.dataTransfer.files[0]); });
     dropZone.addEventListener('click', () => { if (!backgroundImage) imageInput.click(); });
 
@@ -443,13 +456,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Momentum Panning ---
     function stopMomentum() { if (momentumID) { cancelAnimationFrame(momentumID); momentumID = null; } }
     function startMomentum() {
-        if (Math.abs(velX) < 0.2 && Math.abs(velY) < 0.2) {
+        if (Math.abs(velX) < 0.1 && Math.abs(velY) < 0.1) {
             velX = 0; velY = 0; return;
         }
-        const ca = document.querySelector('.canvas-area');
-        ca.scrollLeft -= velX;
-        ca.scrollTop  -= velY;
-        velX *= 0.97; velY *= 0.97; // 減衰率を調整（0.95 -> 0.97 でより伸びる）
+        viewX += velX;
+        viewY += velY;
+        applyTransform();
+        velX *= 0.96; velY *= 0.96;
         momentumID = requestAnimationFrame(startMomentum);
     }
 
@@ -493,7 +506,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     selectedShape = null; isDragging = false;
                     isPanning = true;
                     composite();
-                    // e.preventDefault() はしない（必要に応じて move で呼ぶ）
                 }
                 return;
             }
@@ -523,9 +535,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     draw(e); // 通常のシェイプ移動
                 } else if (isPanning) {
                     e.preventDefault();
-                    const ca = document.querySelector('.canvas-area');
-                    ca.scrollLeft -= dx;
-                    ca.scrollTop  -= dy;
+                    viewX += dx;
+                    viewY += dy;
+                    applyTransform();
                     updateVelocity(dx, dy, dt);
                 }
                 lastTouchX = t.clientX; lastTouchY = t.clientY;
@@ -539,11 +551,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (e.touches.length === 2 && lastPinchDistance !== null) {
             e.preventDefault();
             const d = getDist(e.touches), c = getCenter(e.touches);
-            const scale = 1 + (d / lastPinchDistance - 1) * 0.15;
-            const ca = document.querySelector('.canvas-area');
-            ca.scrollLeft -= c.x - lastPinchCenter.x;
-            ca.scrollTop  -= c.y - lastPinchCenter.y;
-            if (Math.abs(scale - 1) > 0.002) setZoom(currentZoom * scale);
+            const scale = 1 + (d / lastPinchDistance - 1) * 0.25;
+            
+            viewX += c.x - lastPinchCenter.x;
+            viewY += c.y - lastPinchCenter.y;
+            setZoom(viewScale * scale, c.x, c.y);
+            
             lastPinchCenter = c; lastPinchDistance = d;
         }
     }, { passive:false });
@@ -557,9 +570,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.touches.length === 0) { isPanning = false; stopDraw(); }
     });
 
-    // Ctrl + Wheel ズーム（PC）
+    // Wheel Zoom
     document.querySelector('.canvas-area').addEventListener('wheel', e => {
-        if (e.ctrlKey) { e.preventDefault(); setZoom(currentZoom * (e.deltaY > 0 ? 0.99 : 1.01)); }
+        if (e.ctrlKey) {
+            e.preventDefault();
+            const scale = e.deltaY > 0 ? 0.95 : 1.05;
+            setZoom(viewScale * scale, e.clientX, e.clientY);
+        }
     }, { passive:false });
 
     // Mobile check
