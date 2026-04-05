@@ -48,14 +48,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (container) container.style.transform = `translate3d(${viewX}px, ${viewY}px, 0) scale(${viewScale})`;
     }
 
-    function setZoom(z, centerX, centerY) {
+    function setZoom(z, screenX, screenY) {
         const oldS = viewScale;
         viewScale = Math.max(0.1, Math.min(8.0, z));
-        currentZoom = viewScale; // 同期
-        if (centerX !== undefined && centerY !== undefined) {
-            // スケール変更に合わせてオフセットを調整（焦点固定）
-            viewX -= (centerX - viewX) * (viewScale / oldS - 1);
-            viewY -= (centerY - viewY) * (viewScale / oldS - 1);
+        currentZoom = viewScale;
+        if (screenX !== undefined && screenY !== undefined) {
+            // canvas-containerのtransform-originは要素中心なので、
+            // スクリーン座標 → コンテナ中心基準の相対座標へ変換して焦点固定計算
+            const container = document.getElementById('canvas-container');
+            const rect = container.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;  // 現在のコンテナ中心X(スクリーン)
+            const cy = rect.top  + rect.height / 2; // 現在のコンテナ中心Y(スクリーン)
+            // 焦点に対して: scale変化分だけコンテナ中心を動かす
+            viewX += (screenX - cx) * (1 - viewScale / oldS);
+            viewY += (screenY - cy) * (1 - viewScale / oldS);
         }
         applyTransform();
     }
@@ -544,6 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
             velX = 0; velY = 0; moveHistory = [];
 
             if (currentTool === 'move') {
+                e.preventDefault(); // 常にブラウザデフォルト(スクロール・ズーム)をブロック
                 const pos = getPos(e);
                 const hit = hitTest(pos.x, pos.y);
                 if (hit) {
@@ -551,7 +558,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     dragStartX = pos.x; dragStartY = pos.y;
                     canvas.style.cursor = 'grabbing';
                     composite();
-                    e.preventDefault();
                 } else {
                     // 背景タッチならパンモードへ
                     selectedShape = null; isDragging = false;
@@ -573,6 +579,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }, { passive:false });
 
     canvas.addEventListener('touchmove', e => {
+        // 常にブラウザデフォルトのスクロール・ピンチズームをブロック
+        e.preventDefault();
+
         if (e.touches.length === 1) {
             const t = e.touches[0];
             const now = Date.now();
@@ -582,10 +591,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (currentTool === 'move') {
                 if (isDragging && selectedShape) {
-                    e.preventDefault();
-                    draw(e); // 通常のシェイプ移動
+                    draw(e); // シェイプ移動
                 } else if (isPanning) {
-                    e.preventDefault();
                     viewX += dx;
                     viewY += dy;
                     applyTransform();
@@ -596,11 +603,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            e.preventDefault();
             draw(e);
             lastTouchX = t.clientX; lastTouchY = t.clientY;
         } else if (e.touches.length === 2 && lastPinchDistance !== null) {
-            e.preventDefault();
             const d = getDist(e.touches), c = getCenter(e.touches);
             const scale = 1 + (d / lastPinchDistance - 1) * 0.25;
             
@@ -627,14 +632,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelector('.canvas-area').addEventListener('wheel', e => {
         e.preventDefault();
         if (e.ctrlKey) {
-            // Zoom (Pinch or Ctrl+Wheel)
-            const scale = e.deltaY > 0 ? 0.95 : 1.05;
-            setZoom(viewScale * scale, e.clientX, e.clientY);
+            // ピンチズーム or Ctrl+Wheel: deltaYをピクセル換算して滑らかに
+            // deltaMode: 0=px, 1=line, 2=page
+            const delta = e.deltaMode === 1 ? e.deltaY * 20
+                        : e.deltaMode === 2 ? e.deltaY * 300
+                        : e.deltaY;
+            // タッチパッドは小さい値が連続して来るので線形スケールで感度調整
+            const factor = Math.exp(-delta * 0.003);
+            setZoom(viewScale * factor, e.clientX, e.clientY);
         } else {
-            // Pan (Scroll or 2-finger swipe on trackpad)
-            // deltaX/Y を使って表示位置を移動
-            viewX -= e.deltaX;
-            viewY -= e.deltaY;
+            // 2本指スワイプ (パン)
+            const mult = e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? 300 : 1;
+            viewX -= e.deltaX * mult;
+            viewY -= e.deltaY * mult;
             applyTransform();
         }
     }, { passive:false });
