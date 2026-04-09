@@ -519,24 +519,20 @@ document.addEventListener('DOMContentLoaded', () => {
         viewX += velX;
         viewY += velY;
         applyTransform();
-        velX *= 0.96; velY *= 0.96;
+        velX *= 0.97; velY *= 0.97; // 摩擦を少し減らしてより滑らかな慣性に
         momentumID = requestAnimationFrame(startMomentum);
     }
 
     function updateVelocity(dx, dy, dt) {
-        const now = Date.now();
-        moveHistory.push({ dx, dy, dt, t: now });
-        // 直近100msのデータのみ維持
-        moveHistory = moveHistory.filter(m => now - m.t < 100);
-        if (moveHistory.length > 0) {
-            const sumX = moveHistory.reduce((s, m) => s + m.dx, 0);
-            const sumY = moveHistory.reduce((s, m) => s + m.dy, 0);
-            const sumT = moveHistory.reduce((s, m) => s + m.dt, 0);
-            if (sumT > 0) {
-                // 1フレーム(約16.6ms)あたりの移動量に換算
-                velX = (sumX / sumT) * 16.6;
-                velY = (sumY / sumT) * 16.6;
-            }
+        if (dt <= 0) return;
+        const currentVelX = (dx / dt) * 16.6;
+        const currentVelY = (dy / dt) * 16.6;
+        if (Math.abs(velX) < 0.1 && Math.abs(velY) < 0.1) {
+            velX = currentVelX; velY = currentVelY;
+        } else {
+            // ローパスフィルタで速度変化を滑らかにする
+            velX = velX * 0.7 + currentVelX * 0.3;
+            velY = velY * 0.7 + currentVelY * 0.3;
         }
     }
 
@@ -569,11 +565,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // 描画ツール
             e.preventDefault();
             startDraw(e);
-        } else if (e.touches.length === 2) {
+        } else if (e.touches.length >= 2) {
             e.preventDefault();
             lastPinchDistance = getDist(e.touches);
             lastPinchCenter   = getCenter(e.touches);
-            if (isDrawing) stopDraw();
+            if (isDrawing) {
+                // 2本指以上で触れた場合、意図しない描画のあとを残さずキャンセルする
+                isDrawing = false;
+                currentPath = [];
+                composite(); // 未確定のプレビュー線を消去
+            }
             isPanning = false; isDragging = false;
         }
     }, { passive:false });
@@ -622,6 +623,10 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.addEventListener('touchend', e => {
         if (isPanning) {
             isPanning = false;
+            // 指を止めてから離した場合は慣性をリセット
+            if (Date.now() - lastTouchTime > 50) {
+                velX = 0; velY = 0;
+            }
             startMomentum();
         }
         if (e.touches.length < 2) { lastPinchDistance = null; lastPinchCenter = null; }
