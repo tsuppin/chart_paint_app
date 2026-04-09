@@ -594,10 +594,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (isDragging && selectedShape) {
                     draw(e); // シェイプ移動
                 } else if (isPanning) {
-                    viewX += dx;
-                    viewY += dy;
+                    const panSpeed = 1.5;
+                    viewX += dx * panSpeed;
+                    viewY += dy * panSpeed;
                     applyTransform();
-                    updateVelocity(dx, dy, dt);
+                    updateVelocity(dx * panSpeed, dy * panSpeed, dt);
                 }
                 lastTouchX = t.clientX; lastTouchY = t.clientY;
                 lastTouchTime = now;
@@ -611,8 +612,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const scale = 1 + (d / lastPinchDistance - 1) * 0.25;
             
             // 重要: 2本指の中心点の動きをパンニング（移動）として反映
-            viewX += c.x - lastPinchCenter.x;
-            viewY += c.y - lastPinchCenter.y;
+            const panSpeed = 1.5;
+            viewX += (c.x - lastPinchCenter.x) * panSpeed;
+            viewY += (c.y - lastPinchCenter.y) * panSpeed;
             
             setZoom(viewScale * scale, c.x, c.y);
             
