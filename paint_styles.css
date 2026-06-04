@@ -143,6 +143,19 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     flex-shrink: 1;
 }
 
+.upload-filename {
+    font-size: 0.72rem;
+    color: #2ecc71;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+    align-self: center;
+    flex-shrink: 1;
+    opacity: 0.85;
+    letter-spacing: 0.01em;
+}
+
 .canvas-area { 
     flex-grow: 1; 
     background: var(--bg-canvas); 

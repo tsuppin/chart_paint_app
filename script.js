@@ -385,8 +385,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Image / Save / Clear ===
     function handleImage(file) {
         if (!file || !file.type.startsWith('image/')) return;
-        const el = document.getElementById('image-filename');
-        if (el) el.textContent = file.name;
+        const el = document.getElementById('upload-filename');
+        if (el) { el.textContent = file.name; el.title = file.name; }
         const reader = new FileReader();
         reader.onload = ev => {
             const img = new Image();
@@ -474,7 +474,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     btnUpload.addEventListener('click', () => imageInput.click());
-    imageInput.addEventListener('change', e => handleImage(e.target.files[0]));
+    imageInput.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (!file) {
+            const el = document.getElementById('upload-filename');
+            if (el) { el.textContent = ''; el.title = ''; }
+        }
+        handleImage(file);
+        // 同じファイルを再選択できるようにリセット
+        e.target.value = '';
+    });
     btnSave.addEventListener('click', saveImage);
     btnClear.addEventListener('click', clearCanvas);
     if (btnUndo) btnUndo.addEventListener('click', undo);
