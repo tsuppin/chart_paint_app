@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const brushSizeVal   = document.getElementById('brush-size-val');
 
     // === State ===
-    let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 5;
+    let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 8;
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
     let rafPending = false; // requestAnimationFrame 管理フラグ
@@ -118,10 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const seed = Math.round(points[0].x * 1000 + points[0].y * 7);
         const rng = seededRandom(seed);
 
-        // 鉛筆の基本パラメータ
+        // 鉛筆の基本パラメータ（荒めの設定）
         const baseWidth = size;
-        const layerCount = Math.max(2, Math.min(5, Math.round(baseWidth * 0.8))); // ストロークの重ね枚数
-        const grainDensity = 0.35; // グレイン密度
+        const layerCount = Math.max(3, Math.min(7, Math.round(baseWidth * 1.2))); // レイヤー枚数を増加
+        const grainDensity = 0.7; // グレイン密度を2倍に
 
         if (selected) {
             // 選択時は破線で表示
@@ -140,13 +140,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // --- メインストローク: 複数の細い半透明レイヤーを重ねてグラファイトの質感を出す ---
+        // --- メインストローク: 複数の半透明レイヤーを大きくずらして荒い質感を出す ---
         for (let layer = 0; layer < layerCount; layer++) {
             tc.save();
-            const layerAlpha = (0.15 + rng() * 0.12) * (1.0 - layer * 0.05);
-            const offsetX = (rng() - 0.5) * baseWidth * 0.5;
-            const offsetY = (rng() - 0.5) * baseWidth * 0.5;
-            const layerWidth = baseWidth * (0.3 + rng() * 0.4);
+            const layerAlpha = (0.12 + rng() * 0.18) * (1.0 - layer * 0.03);
+            const offsetX = (rng() - 0.5) * baseWidth * 0.9;  // オフセットを拡大
+            const offsetY = (rng() - 0.5) * baseWidth * 0.9;
+            const layerWidth = baseWidth * (0.2 + rng() * 0.5);
 
             tc.strokeStyle = `rgba(${r},${g},${b},${layerAlpha})`;
             tc.lineWidth = layerWidth;
@@ -156,9 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tc.beginPath();
             for (let i = 0; i < points.length; i++) {
-                // 各点に微小なランダムオフセットを加えてザラつき感を出す
-                const jitterX = (rng() - 0.5) * baseWidth * 0.15;
-                const jitterY = (rng() - 0.5) * baseWidth * 0.15;
+                // 各点に大きめのランダムオフセットでザラつき感を強調
+                const jitterX = (rng() - 0.5) * baseWidth * 0.4;
+                const jitterY = (rng() - 0.5) * baseWidth * 0.4;
                 const px = points[i].x + offsetX + jitterX;
                 const py = points[i].y + offsetY + jitterY;
                 if (i === 0) tc.moveTo(px, py);
@@ -168,25 +168,24 @@ document.addEventListener('DOMContentLoaded', () => {
             tc.restore();
         }
 
-        // --- エッジテクスチャ: ストロークの縁にザラザラした粒を散らす ---
+        // --- エッジテクスチャ: ストロークの縁にザラザラした粒を多めに散らす ---
         tc.save();
-        const grainAlpha = 0.08 + rng() * 0.06;
-        tc.fillStyle = `rgba(${r},${g},${b},${grainAlpha})`;
         for (let i = 1; i < points.length; i++) {
             const dx = points[i].x - points[i-1].x;
             const dy = points[i].y - points[i-1].y;
             const segLen = Math.hypot(dx, dy);
             if (segLen < 0.5) continue;
 
-            const grainCount = Math.max(1, Math.round(segLen * grainDensity * baseWidth * 0.1));
-            for (let g = 0; g < grainCount; g++) {
+            const grainCount = Math.max(2, Math.round(segLen * grainDensity * baseWidth * 0.15));
+            for (let gi = 0; gi < grainCount; gi++) {
                 const t = rng();
-                const spread = (rng() - 0.5) * baseWidth * 0.9;
-                const nx = -dy / segLen, ny = dx / segLen; // 法線方向
+                const spread = (rng() - 0.5) * baseWidth * 1.3; // 粒の散らばりを拡大
+                const nx = -dy / segLen, ny = dx / segLen;
                 const gx = points[i-1].x + dx * t + nx * spread;
                 const gy = points[i-1].y + dy * t + ny * spread;
-                const gs = 0.3 + rng() * 1.0;
-                tc.globalAlpha = 0.05 + rng() * 0.1;
+                const gs = 0.5 + rng() * 1.8; // 粒のサイズを拡大
+                tc.globalAlpha = 0.06 + rng() * 0.14;
+                tc.fillStyle = `rgba(${r},${g},${b},1)`;
                 tc.fillRect(gx, gy, gs, gs);
             }
         }
@@ -196,7 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tc.save();
         tc.lineCap = 'round';
         tc.lineJoin = 'round';
-        tc.strokeStyle = `rgba(${r},${g},${b},0.25)`;
+        tc.strokeStyle = `rgba(${r},${g},${b},0.3)`;
         tc.globalCompositeOperation = 'source-over';
         tc.beginPath();
         for (let i = 0; i < points.length; i++) {
@@ -206,8 +205,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // 速度ベースの太さ（速い=細い、遅い=太い）
             const segLen = Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
-            const speedFactor = Math.max(0.4, Math.min(1.0, 1.0 - segLen / 40));
-            tc.lineWidth = baseWidth * speedFactor * 0.6;
+            const speedFactor = Math.max(0.4, Math.min(1.0, 1.0 - segLen / 30));
+            tc.lineWidth = baseWidth * speedFactor * 0.7;
             tc.lineTo(points[i].x, points[i].y);
             tc.stroke();
             tc.beginPath();
@@ -216,32 +215,44 @@ document.addEventListener('DOMContentLoaded', () => {
         tc.restore();
     }
 
+    // 直線をポイント列に変換（鉛筆テクスチャ適用用）
+    function lineToPoints(x1, y1, x2, y2) {
+        const dist = Math.hypot(x2 - x1, y2 - y1);
+        const steps = Math.max(2, Math.round(dist / 3));
+        const pts = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            pts.push({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t });
+        }
+        return pts;
+    }
+
+    // 楕円をポイント列に変換（鉛筆テクスチャ適用用）
+    function ellipseToPoints(cx, cy, rx, ry) {
+        const circumference = Math.PI * (3 * (rx + ry) - Math.sqrt((3 * rx + ry) * (rx + 3 * ry)));
+        const steps = Math.max(24, Math.round(circumference / 3));
+        const pts = [];
+        for (let i = 0; i <= steps; i++) {
+            const angle = (i / steps) * 2 * Math.PI;
+            pts.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) });
+        }
+        return pts;
+    }
+
     function drawObj(tc, s, sel) {
         tc.save();
-        if (sel && s.type !== 'pencil') { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
+        if (sel && s.type === 'text') { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
 
         if (s.type === 'pencil') {
             drawPencilStroke(tc, s.points, s.color, s.size, sel);
 
         } else if (s.type === 'line') {
-            tc.lineWidth = s.size;
-            tc.strokeStyle = s.color;
-            tc.lineCap = 'square';
-            tc.lineJoin = 'miter';
-            if (sel) tc.setLineDash([8, 5]);
-            tc.beginPath();
-            tc.moveTo(s.x1, s.y1); tc.lineTo(s.x2, s.y2);
-            tc.stroke();
+            const pts = lineToPoints(s.x1, s.y1, s.x2, s.y2);
+            drawPencilStroke(tc, pts, s.color, s.size, sel);
 
         } else if (s.type === 'circle') {
-            tc.lineWidth = s.size;
-            tc.strokeStyle = s.color;
-            tc.lineCap = 'square';
-            tc.lineJoin = 'miter';
-            if (sel) tc.setLineDash([8, 5]);
-            tc.beginPath();
-            tc.ellipse(s.cx, s.cy, s.rx, s.ry, 0, 0, 2*Math.PI);
-            tc.stroke();
+            const pts = ellipseToPoints(s.cx, s.cy, s.rx, s.ry);
+            drawPencilStroke(tc, pts, s.color, s.size, sel);
 
         } else if (s.type === 'text') {
             const fontSize = s.size * 4;
