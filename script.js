@@ -94,28 +94,150 @@ document.addEventListener('DOMContentLoaded', () => {
         if (preview) drawObj(ctx, preview, false);
     }
 
+    // === Pencil texture helpers ===
+    // シードベースの疑似乱数（描画のたびに同じノイズパターンを再現）
+    function seededRandom(seed) {
+        let s = seed % 2147483647;
+        if (s <= 0) s += 2147483646;
+        return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+    }
+
+    // 色文字列をRGBA成分に分解
+    function parseColor(c) {
+        const d = document.createElement('canvas'); d.width = d.height = 1;
+        const x = d.getContext('2d'); x.fillStyle = c; x.fillRect(0,0,1,1);
+        const [r,g,b,a] = x.getImageData(0,0,1,1).data;
+        return {r,g,b,a};
+    }
+
+    // 鉛筆風ストロークを描画
+    function drawPencilStroke(tc, points, color, size, selected) {
+        if (points.length < 2) return;
+
+        const {r, g, b} = parseColor(color);
+        const seed = Math.round(points[0].x * 1000 + points[0].y * 7);
+        const rng = seededRandom(seed);
+
+        // 鉛筆の基本パラメータ
+        const baseWidth = size;
+        const layerCount = Math.max(2, Math.min(5, Math.round(baseWidth * 0.8))); // ストロークの重ね枚数
+        const grainDensity = 0.35; // グレイン密度
+
+        if (selected) {
+            // 選択時は破線で表示
+            tc.save();
+            tc.setLineDash([6, 4]);
+            tc.lineWidth = size;
+            tc.strokeStyle = color;
+            tc.lineCap = 'round';
+            tc.lineJoin = 'round';
+            tc.shadowColor = 'rgba(255,255,255,0.9)';
+            tc.shadowBlur = 14;
+            tc.beginPath();
+            points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+            tc.stroke();
+            tc.restore();
+            return;
+        }
+
+        // --- メインストローク: 複数の細い半透明レイヤーを重ねてグラファイトの質感を出す ---
+        for (let layer = 0; layer < layerCount; layer++) {
+            tc.save();
+            const layerAlpha = (0.15 + rng() * 0.12) * (1.0 - layer * 0.05);
+            const offsetX = (rng() - 0.5) * baseWidth * 0.5;
+            const offsetY = (rng() - 0.5) * baseWidth * 0.5;
+            const layerWidth = baseWidth * (0.3 + rng() * 0.4);
+
+            tc.strokeStyle = `rgba(${r},${g},${b},${layerAlpha})`;
+            tc.lineWidth = layerWidth;
+            tc.lineCap = 'round';
+            tc.lineJoin = 'round';
+            tc.globalCompositeOperation = 'source-over';
+
+            tc.beginPath();
+            for (let i = 0; i < points.length; i++) {
+                // 各点に微小なランダムオフセットを加えてザラつき感を出す
+                const jitterX = (rng() - 0.5) * baseWidth * 0.15;
+                const jitterY = (rng() - 0.5) * baseWidth * 0.15;
+                const px = points[i].x + offsetX + jitterX;
+                const py = points[i].y + offsetY + jitterY;
+                if (i === 0) tc.moveTo(px, py);
+                else tc.lineTo(px, py);
+            }
+            tc.stroke();
+            tc.restore();
+        }
+
+        // --- エッジテクスチャ: ストロークの縁にザラザラした粒を散らす ---
+        tc.save();
+        const grainAlpha = 0.08 + rng() * 0.06;
+        tc.fillStyle = `rgba(${r},${g},${b},${grainAlpha})`;
+        for (let i = 1; i < points.length; i++) {
+            const dx = points[i].x - points[i-1].x;
+            const dy = points[i].y - points[i-1].y;
+            const segLen = Math.hypot(dx, dy);
+            if (segLen < 0.5) continue;
+
+            const grainCount = Math.max(1, Math.round(segLen * grainDensity * baseWidth * 0.1));
+            for (let g = 0; g < grainCount; g++) {
+                const t = rng();
+                const spread = (rng() - 0.5) * baseWidth * 0.9;
+                const nx = -dy / segLen, ny = dx / segLen; // 法線方向
+                const gx = points[i-1].x + dx * t + nx * spread;
+                const gy = points[i-1].y + dy * t + ny * spread;
+                const gs = 0.3 + rng() * 1.0;
+                tc.globalAlpha = 0.05 + rng() * 0.1;
+                tc.fillRect(gx, gy, gs, gs);
+            }
+        }
+        tc.restore();
+
+        // --- 筆圧シミュレーション: セグメント間の速度差で太さを変える中心線 ---
+        tc.save();
+        tc.lineCap = 'round';
+        tc.lineJoin = 'round';
+        tc.strokeStyle = `rgba(${r},${g},${b},0.25)`;
+        tc.globalCompositeOperation = 'source-over';
+        tc.beginPath();
+        for (let i = 0; i < points.length; i++) {
+            if (i === 0) {
+                tc.moveTo(points[i].x, points[i].y);
+                continue;
+            }
+            // 速度ベースの太さ（速い=細い、遅い=太い）
+            const segLen = Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
+            const speedFactor = Math.max(0.4, Math.min(1.0, 1.0 - segLen / 40));
+            tc.lineWidth = baseWidth * speedFactor * 0.6;
+            tc.lineTo(points[i].x, points[i].y);
+            tc.stroke();
+            tc.beginPath();
+            tc.moveTo(points[i].x, points[i].y);
+        }
+        tc.restore();
+    }
+
     function drawObj(tc, s, sel) {
         tc.save();
-        tc.lineWidth = s.size;
-        tc.strokeStyle = s.color;
-        tc.lineCap = 'square';
-        tc.lineJoin = 'miter';
-        if (sel) { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
+        if (sel && s.type !== 'pencil') { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
 
         if (s.type === 'pencil') {
-            if (s.points.length < 2) { tc.restore(); return; }
-            if (sel) tc.setLineDash([6, 4]);
-            tc.beginPath();
-            s.points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
-            tc.stroke();
+            drawPencilStroke(tc, s.points, s.color, s.size, sel);
 
         } else if (s.type === 'line') {
+            tc.lineWidth = s.size;
+            tc.strokeStyle = s.color;
+            tc.lineCap = 'square';
+            tc.lineJoin = 'miter';
             if (sel) tc.setLineDash([8, 5]);
             tc.beginPath();
             tc.moveTo(s.x1, s.y1); tc.lineTo(s.x2, s.y2);
             tc.stroke();
 
         } else if (s.type === 'circle') {
+            tc.lineWidth = s.size;
+            tc.strokeStyle = s.color;
+            tc.lineCap = 'square';
+            tc.lineJoin = 'miter';
             if (sel) tc.setLineDash([8, 5]);
             tc.beginPath();
             tc.ellipse(s.cx, s.cy, s.rx, s.ry, 0, 0, 2*Math.PI);
