@@ -102,6 +102,33 @@ document.addEventListener('DOMContentLoaded', () => {
         return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     }
 
+    // ポイント列をベジェ曲線で滑らかに描画するヘルパー
+    function traceSmooth(tc, points) {
+        if (points.length < 2) return;
+        tc.beginPath();
+        tc.moveTo(points[0].x, points[0].y);
+        if (points.length === 2) {
+            tc.lineTo(points[1].x, points[1].y);
+        } else {
+            // 最初のセグメント: 最初の点から、最初と2番目の中点へ
+            tc.quadraticCurveTo(
+                points[0].x, points[0].y,
+                (points[0].x + points[1].x) / 2, (points[0].y + points[1].y) / 2
+            );
+            // 中間セグメント: 中点から中点へ、各ポイントを制御点として使用
+            for (let i = 1; i < points.length - 1; i++) {
+                const cpx = points[i].x;
+                const cpy = points[i].y;
+                const epx = (points[i].x + points[i + 1].x) / 2;
+                const epy = (points[i].y + points[i + 1].y) / 2;
+                tc.quadraticCurveTo(cpx, cpy, epx, epy);
+            }
+            // 最後のセグメント: 最後の点へ直接
+            const last = points[points.length - 1];
+            tc.lineTo(last.x, last.y);
+        }
+    }
+
     // 色文字列をRGBA成分に分解
     function parseColor(c) {
         const d = document.createElement('canvas'); d.width = d.height = 1;
@@ -110,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return {r,g,b,a};
     }
 
-    // 鉛筆風ストロークを描画（シンプル半透明）
+    // 鉛筆風ストロークを描画（シンプル半透明・ベジェ曲線補間）
     function drawPencilStroke(tc, points, color, size, selected) {
         if (points.length < 2) return;
 
@@ -126,8 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tc.lineJoin = 'round';
             tc.shadowColor = 'rgba(255,255,255,0.9)';
             tc.shadowBlur = 14;
-            tc.beginPath();
-            points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+            traceSmooth(tc, points);
             tc.stroke();
             tc.restore();
             return;
@@ -140,19 +166,17 @@ document.addEventListener('DOMContentLoaded', () => {
         tc.lineCap = 'round';
         tc.lineJoin = 'round';
         tc.globalCompositeOperation = 'source-over';
-        tc.beginPath();
-        points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+        traceSmooth(tc, points);
         tc.stroke();
         tc.restore();
 
-        // --- 軽いエッジ補強: やや細い線で重ね描き ---
+        // --- 軽いエッジ補強: やや太い半透明で重ね描き ---
         tc.save();
         tc.strokeStyle = `rgba(${r},${g},${b},0.25)`;
         tc.lineWidth = size * 1.5;
         tc.lineCap = 'round';
         tc.lineJoin = 'round';
-        tc.beginPath();
-        points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+        traceSmooth(tc, points);
         tc.stroke();
         tc.restore();
     }
@@ -348,6 +372,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const cx = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
         const cy = (e.touches && e.touches.length) ? e.touches[0].clientY : e.clientY;
         return { x:(cx-rect.left)*(canvas.width/rect.width), y:(cy-rect.top)*(canvas.height/rect.height) };
+    }
+
+    // clientX/clientY からキャンバス座標へ変換（coalesced events用）
+    function clientToCanvas(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return { x:(clientX-rect.left)*(canvas.width/rect.width), y:(clientY-rect.top)*(canvas.height/rect.height) };
     }
 
     function startDraw(e) {
@@ -689,7 +719,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            draw(e);
+            // ペンシルツール: タッチ間を補間して滑らかにする
+            if (currentTool === 'pencil' && isDrawing) {
+                const pos = clientToCanvas(t.clientX, t.clientY);
+                // 前回のポイントとの距離が大きい場合、中間ポイントを補間
+                if (currentPath.length > 0) {
+                    const prev = currentPath[currentPath.length - 1];
+                    const segDist = Math.hypot(pos.x - prev.x, pos.y - prev.y);
+                    const INTERPOLATION_THRESHOLD = 8; // この距離以上で補間
+                    if (segDist > INTERPOLATION_THRESHOLD) {
+                        const steps = Math.ceil(segDist / INTERPOLATION_THRESHOLD);
+                        for (let si = 1; si < steps; si++) {
+                            const frac = si / steps;
+                            currentPath.push({
+                                x: prev.x + (pos.x - prev.x) * frac,
+                                y: prev.y + (pos.y - prev.y) * frac
+                            });
+                        }
+                    }
+                }
+                currentPath.push(pos);
+                lastPos = pos;
+                composite({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
+            } else {
+                draw(e);
+            }
             lastTouchX = t.clientX; lastTouchY = t.clientY;
         } else if (e.touches.length === 2 && lastPinchDistance !== null) {
             const d = getDist(e.touches), c = getCenter(e.touches);
