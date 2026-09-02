@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const brushSizeVal   = document.getElementById('brush-size-val');
 
     // === State ===
-    let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 8;
+    let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 12;
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
     let rafPending = false; // requestAnimationFrame 管理フラグ
@@ -143,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- メインストローク: 複数の半透明レイヤーを大きくずらして荒い質感を出す ---
         for (let layer = 0; layer < layerCount; layer++) {
             tc.save();
-            const layerAlpha = (0.12 + rng() * 0.18) * (1.0 - layer * 0.03);
+            const layerAlpha = (0.05 + rng() * 0.09) * (1.0 - layer * 0.03);
             const offsetX = (rng() - 0.5) * baseWidth * 0.9;  // オフセットを拡大
             const offsetY = (rng() - 0.5) * baseWidth * 0.9;
             const layerWidth = baseWidth * (0.2 + rng() * 0.5);
@@ -184,7 +184,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const gx = points[i-1].x + dx * t + nx * spread;
                 const gy = points[i-1].y + dy * t + ny * spread;
                 const gs = 0.5 + rng() * 1.8; // 粒のサイズを拡大
-                tc.globalAlpha = 0.06 + rng() * 0.14;
+                tc.globalAlpha = 0.03 + rng() * 0.07;
                 tc.fillStyle = `rgba(${r},${g},${b},1)`;
                 tc.fillRect(gx, gy, gs, gs);
             }
@@ -195,7 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tc.save();
         tc.lineCap = 'round';
         tc.lineJoin = 'round';
-        tc.strokeStyle = `rgba(${r},${g},${b},0.3)`;
+        tc.strokeStyle = `rgba(${r},${g},${b},0.12)`;
         tc.globalCompositeOperation = 'source-over';
         tc.beginPath();
         for (let i = 0; i < points.length; i++) {
