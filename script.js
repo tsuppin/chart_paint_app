@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const brushSizeVal   = document.getElementById('brush-size-val');
 
     // === State ===
-    let currentTool = 'pencil', currentColor = '#ff4d4d', currentSize = 12;
+    let currentTool = 'pencil', currentColor = '#ffffff', currentSize = 3;
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
     let rafPending = false; // requestAnimationFrame 管理フラグ
@@ -110,18 +110,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return {r,g,b,a};
     }
 
-    // 鉛筆風ストロークを描画
+    // 鉛筆風ストロークを描画（シンプル半透明）
     function drawPencilStroke(tc, points, color, size, selected) {
         if (points.length < 2) return;
 
         const {r, g, b} = parseColor(color);
-        const seed = Math.round(points[0].x * 1000 + points[0].y * 7);
-        const rng = seededRandom(seed);
-
-        // 鉛筆の基本パラメータ（荒めの設定）
-        const baseWidth = size;
-        const layerCount = Math.max(3, Math.min(7, Math.round(baseWidth * 1.2))); // レイヤー枚数を増加
-        const grainDensity = 0.7; // グレイン密度を2倍に
 
         if (selected) {
             // 選択時は破線で表示
@@ -140,78 +133,27 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // --- メインストローク: 複数の半透明レイヤーを大きくずらして荒い質感を出す ---
-        for (let layer = 0; layer < layerCount; layer++) {
-            tc.save();
-            const layerAlpha = (0.05 + rng() * 0.09) * (1.0 - layer * 0.03);
-            const offsetX = (rng() - 0.5) * baseWidth * 0.9;  // オフセットを拡大
-            const offsetY = (rng() - 0.5) * baseWidth * 0.9;
-            const layerWidth = baseWidth * (0.2 + rng() * 0.5);
-
-            tc.strokeStyle = `rgba(${r},${g},${b},${layerAlpha})`;
-            tc.lineWidth = layerWidth;
-            tc.lineCap = 'round';
-            tc.lineJoin = 'round';
-            tc.globalCompositeOperation = 'source-over';
-
-            tc.beginPath();
-            for (let i = 0; i < points.length; i++) {
-                // 各点に大きめのランダムオフセットでザラつき感を強調
-                const jitterX = (rng() - 0.5) * baseWidth * 0.4;
-                const jitterY = (rng() - 0.5) * baseWidth * 0.4;
-                const px = points[i].x + offsetX + jitterX;
-                const py = points[i].y + offsetY + jitterY;
-                if (i === 0) tc.moveTo(px, py);
-                else tc.lineTo(px, py);
-            }
-            tc.stroke();
-            tc.restore();
-        }
-
-        // --- エッジテクスチャ: ストロークの縁にザラザラした粒を多めに散らす ---
+        // --- メインストローク: シンプルな半透明ライン ---
         tc.save();
-        for (let i = 1; i < points.length; i++) {
-            const dx = points[i].x - points[i-1].x;
-            const dy = points[i].y - points[i-1].y;
-            const segLen = Math.hypot(dx, dy);
-            if (segLen < 0.5) continue;
-
-            const grainCount = Math.max(2, Math.round(segLen * grainDensity * baseWidth * 0.15));
-            for (let gi = 0; gi < grainCount; gi++) {
-                const t = rng();
-                const spread = (rng() - 0.5) * baseWidth * 1.3; // 粒の散らばりを拡大
-                const nx = -dy / segLen, ny = dx / segLen;
-                const gx = points[i-1].x + dx * t + nx * spread;
-                const gy = points[i-1].y + dy * t + ny * spread;
-                const gs = 0.5 + rng() * 1.8; // 粒のサイズを拡大
-                tc.globalAlpha = 0.03 + rng() * 0.07;
-                tc.fillStyle = `rgba(${r},${g},${b},1)`;
-                tc.fillRect(gx, gy, gs, gs);
-            }
-        }
-        tc.restore();
-
-        // --- 筆圧シミュレーション: セグメント間の速度差で太さを変える中心線 ---
-        tc.save();
+        tc.strokeStyle = `rgba(${r},${g},${b},0.55)`;
+        tc.lineWidth = size;
         tc.lineCap = 'round';
         tc.lineJoin = 'round';
-        tc.strokeStyle = `rgba(${r},${g},${b},0.12)`;
         tc.globalCompositeOperation = 'source-over';
         tc.beginPath();
-        for (let i = 0; i < points.length; i++) {
-            if (i === 0) {
-                tc.moveTo(points[i].x, points[i].y);
-                continue;
-            }
-            // 速度ベースの太さ（速い=細い、遅い=太い）
-            const segLen = Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
-            const speedFactor = Math.max(0.4, Math.min(1.0, 1.0 - segLen / 30));
-            tc.lineWidth = baseWidth * speedFactor * 0.7;
-            tc.lineTo(points[i].x, points[i].y);
-            tc.stroke();
-            tc.beginPath();
-            tc.moveTo(points[i].x, points[i].y);
-        }
+        points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+        tc.stroke();
+        tc.restore();
+
+        // --- 軽いエッジ補強: やや細い線で重ね描き ---
+        tc.save();
+        tc.strokeStyle = `rgba(${r},${g},${b},0.25)`;
+        tc.lineWidth = size * 1.5;
+        tc.lineCap = 'round';
+        tc.lineJoin = 'round';
+        tc.beginPath();
+        points.forEach((p, i) => i === 0 ? tc.moveTo(p.x, p.y) : tc.lineTo(p.x, p.y));
+        tc.stroke();
         tc.restore();
     }
 
