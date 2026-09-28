@@ -63,13 +63,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const oldS = viewScale;
         viewScale = Math.max(0.1, Math.min(8.0, z));
         currentZoom = viewScale;
-        if (screenX !== undefined && screenY !== undefined) {
+        if (screenX !== undefined && screenY !== undefined && oldS > 0) {
             const container = document.getElementById('canvas-container');
-            const rect = container.getBoundingClientRect();
-            const cx = rect.left + rect.width / 2;
-            const cy = rect.top  + rect.height / 2;
-            viewX += (screenX - cx) * (1 - viewScale / oldS);
-            viewY += (screenY - cy) * (1 - viewScale / oldS);
+            if (container) {
+                const rect = container.getBoundingClientRect();
+                // 左上原点(transform-origin: 0 0)に合わせてrect.left/topを基準に焦点固定
+                viewX += (screenX - rect.left) * (1 - viewScale / oldS);
+                viewY += (screenY - rect.top)  * (1 - viewScale / oldS);
+            }
         }
         applyTransform();
     }
@@ -77,8 +78,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const getDist   = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
     const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
-    // 画面サイズに合わせて画郭の「左上」を起点に配置＆小さくなりすぎないよう調整
-    function fitToScreen() {
+    // 画面サイズに合わせてキャンバスを配置
+    // isOpeningImage: 画像を開いた直後かどうか
+    function fitToScreen(isOpeningImage = false) {
         const area = document.querySelector('.canvas-area');
         if (!area || canvas.width === 0 || canvas.height === 0) return;
         const areaW = area.clientWidth;
@@ -86,35 +88,51 @@ document.addEventListener('DOMContentLoaded', () => {
         if (areaW === 0 || areaH === 0) return;
 
         const isMobile = window.innerWidth <= 768;
+        const hasImage = !!backgroundImage || isOpeningImage;
         let scale;
 
-        if (isMobile) {
-            // スマホ: 縮小されすぎて文字やチャートが読めなくなるのを防ぐ
-            // 画面幅基準と0.85のうち小さくなりすぎない値を採用
-            const fitW = (areaW - 16) / canvas.width;
-            scale = Math.max(0.85, Math.min(1.2, fitW));
-            // 元画像がスマホ幅以下の場合は原寸(1.0)
-            if (canvas.width <= areaW) scale = 1.0;
+        if (hasImage) {
+            // === 画像選択後の表示（PC・スマホともに画郭の「左上」に配置） ===
+            if (isMobile) {
+                // スマホ: 画面横幅に合わせて大きく表示（左右余白各8px）
+                // 画面中央に寄らず、左上からドカンと大きく表示される
+                scale = (areaW - 16) / canvas.width;
+                scale = Math.max(0.2, Math.min(2.0, scale));
+                viewScale = currentZoom = scale;
+                // 画郭の左上にピッタリ配置
+                viewX = 8;
+                viewY = 8;
+            } else {
+                // PC: 左上を起点にして大きく表示
+                const scaleW = (areaW - 48) / canvas.width;
+                const scaleH = (areaH - 48) / canvas.height;
+                scale = Math.min(scaleW, scaleH);
+                scale = Math.max(0.5, Math.min(1.0, scale));
+                if (canvas.width <= areaW - 48 && canvas.height <= areaH - 48) scale = 1.0;
+                viewScale = currentZoom = scale;
+                // 画郭の左上に配置
+                viewX = 24;
+                viewY = 20;
+            }
         } else {
-            // PC: 画像が小さくなりすぎないよう原寸(1.0)〜下限0.8で大きく表示
-            const fitW = (areaW - 32) / canvas.width;
-            const fitH = (areaH - 32) / canvas.height;
-            const fitScale = Math.min(fitW, fitH);
-            scale = Math.max(0.8, Math.min(1.0, fitScale));
-            // 画面内に収まる画像は原寸(1.0)
-            if (canvas.width <= areaW - 32 && canvas.height <= areaH - 32) scale = 1.0;
+            // === 初期画面（画像を開く前） ===
+            if (isMobile) {
+                // スマホ初期画面: 左上配置（スマホはこのままでOK）
+                scale = (areaW - 16) / canvas.width;
+                scale = Math.max(0.2, Math.min(1.5, scale));
+                viewScale = currentZoom = scale;
+                viewX = 8;
+                viewY = 10;
+            } else {
+                // PC初期画面: 画面中央に配置（PCで左寄りすぎないよう中央揃え）
+                const scaleW = (areaW - 64) / canvas.width;
+                const scaleH = (areaH - 64) / canvas.height;
+                scale = Math.min(scaleW, scaleH, 1.0);
+                viewScale = currentZoom = scale;
+                viewX = Math.round((areaW - canvas.width * scale) / 2);
+                viewY = Math.round((areaH - canvas.height * scale) / 2);
+            }
         }
-
-        viewScale = currentZoom = scale;
-
-        // 画郭（.canvas-area）の「左上」を起点として配置
-        const scaledW = canvas.width * scale;
-        const scaledH = canvas.height * scale;
-        const targetLeft = isMobile ? 8 : 16;
-        const targetTop  = isMobile ? 8 : 16;
-
-        viewX = targetLeft - (areaW - scaledW) / 2;
-        viewY = targetTop  - (areaH - scaledH) / 2;
 
         velX = 0;
         velY = 0;
@@ -998,10 +1016,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const container = document.getElementById('canvas-container');
             if (container && oldS > 0) {
                 const rect = container.getBoundingClientRect();
-                const cx = rect.left + rect.width / 2;
-                const cy = rect.top  + rect.height / 2;
-                viewX += deltaX + (c.x - cx) * (1 - newScale / oldS);
-                viewY += deltaY + (c.y - cy) * (1 - newScale / oldS);
+                viewX += deltaX + (c.x - rect.left) * (1 - newScale / oldS);
+                viewY += deltaY + (c.y - rect.top)  * (1 - newScale / oldS);
                 viewScale = currentZoom = newScale;
                 applyTransform();
             }

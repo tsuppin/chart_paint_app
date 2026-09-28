@@ -164,7 +164,7 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     padding: 0; 
     overflow: hidden; 
     position: relative; 
-    display: flex;
+    display: block; 
     touch-action: none; 
     overscroll-behavior: none;
 }
@@ -199,8 +199,11 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     background: #fff; 
     box-shadow: 0 10px 40px rgba(0,0,0,0.5); 
     border-radius: 4px; 
-    position: relative; 
-    margin: auto;
+    position: absolute; 
+    top: 0;
+    left: 0;
+    margin: 0;
+    transform-origin: 0 0;
     will-change: transform; /* GPU accelerated */
     transform: translateZ(0); /* Force layer */
 }
