@@ -77,6 +77,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const getDist   = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
     const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
+    // 画面サイズに合わせてキャンバスを自動フィット
+    function fitToScreen() {
+        const area = document.querySelector('.canvas-area');
+        if (!area || canvas.width === 0 || canvas.height === 0) return;
+        const areaW = area.clientWidth;
+        const areaH = area.clientHeight;
+        if (areaW === 0 || areaH === 0) return;
+
+        const paddingRatio = 0.92;
+        const scaleW = (areaW * paddingRatio) / canvas.width;
+        const scaleH = (areaH * paddingRatio) / canvas.height;
+        let scale = Math.min(scaleW, scaleH);
+        scale = Math.max(0.1, Math.min(2.0, scale));
+
+        viewScale = currentZoom = scale;
+        viewX = 0;
+        viewY = 0;
+        velX = 0;
+        velY = 0;
+        stopMomentum();
+        applyTransform();
+    }
+
     // === Canvas Init ===
     function initCanvas() {
         const mob = window.innerWidth <= 768;
@@ -89,8 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
         baseCtx.fillStyle = '#ffffff';
         baseCtx.fillRect(0, 0, w, h);
         shapes = []; selectedShape = null; currentPath = [];
-        currentZoom = viewScale = 1.0; viewX = 0; viewY = 0;
-        applyTransform();
+        fitToScreen();
         shapesCacheValid = false;
         undoStack = [];
         updateBaseSnapshot();
@@ -438,8 +460,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Pointer ===
     function getPos(e) {
         const rect = canvas.getBoundingClientRect();
-        const cx = (e.touches && e.touches.length) ? e.touches[0].clientX : e.clientX;
-        const cy = (e.touches && e.touches.length) ? e.touches[0].clientY : e.clientY;
+        let cx = e.clientX, cy = e.clientY;
+        if (e.touches && e.touches.length > 0) {
+            cx = e.touches[0].clientX;
+            cy = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+            cx = e.changedTouches[0].clientX;
+            cy = e.changedTouches[0].clientY;
+        }
         return { x:(cx-rect.left)*(canvas.width/rect.width), y:(cy-rect.top)*(canvas.height/rect.height) };
     }
 
@@ -611,10 +639,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 canvas.height = baseCanvas.height = shapesCache.height = Math.round(h);
                 baseCtx.drawImage(img, 0, 0, Math.round(w), Math.round(h));
                 shapes = []; selectedShape = null; currentPath = [];
-                // ビューをリセット
-                viewScale = currentZoom = 1.0; viewX = 0; viewY = 0;
-                velX = 0; velY = 0; stopMomentum(); // 慣性もリセット
-                applyTransform();
+                // ビューを画面サイズに合わせてリセット＆自動フィット
+                fitToScreen();
                 shapesCacheValid = false;
                 undoStack = [];
                 updateBaseSnapshot();
@@ -785,8 +811,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Touch（1本指=描画/移動/パン、2本指=ピンチズーム） ---
-    canvas.addEventListener('touchstart', e => {
+    // --- Touch（1本指=描画/移動/余白パン、2本指=ピンチズーム＆パン） ---
+    function onTouchStart(e) {
         stopMomentum();
         if (e.touches.length === 1) {
             const t = e.touches[0];
@@ -794,10 +820,17 @@ document.addEventListener('DOMContentLoaded', () => {
             lastTouchTime = Date.now();
             velX = 0; velY = 0; moveHistory = [];
 
+            // タッチ位置がキャンバス枠内かどうかを判定
+            const rect = canvas.getBoundingClientRect();
+            const isInsideCanvas = (
+                t.clientX >= rect.left && t.clientX <= rect.right &&
+                t.clientY >= rect.top && t.clientY <= rect.bottom
+            );
+
             if (currentTool === 'move') {
-                e.preventDefault(); // 常にブラウザデフォルト(スクロール・ズーム)をブロック
+                e.preventDefault();
                 const pos = getPos(e);
-                const hit = hitTest(pos.x, pos.y);
+                const hit = isInsideCanvas ? hitTest(pos.x, pos.y) : null;
                 if (hit) {
                     const prevSelected = selectedShape;
                     selectedShape = hit; isDragging = true;
@@ -806,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (prevSelected !== selectedShape) shapesCacheValid = false;
                     composite();
                 } else {
-                    // 背景タッチならパンモードへ
+                    // 背景や余白タッチならパンモードへ
                     const prevSelected = selectedShape;
                     selectedShape = null; isDragging = false;
                     isPanning = true;
@@ -815,9 +848,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return;
             }
-            // 描画ツール
-            e.preventDefault();
-            startDraw(e);
+
+            // 描画ツールの場合:
+            // キャンバス内なら描画開始、余白（キャンバス外）ならパンを開始
+            if (isInsideCanvas) {
+                e.preventDefault();
+                startDraw(e);
+            } else {
+                // 余白を触った場合は描画せずパン
+                e.preventDefault();
+                isPanning = true;
+                isDrawing = false;
+            }
         } else if (e.touches.length >= 2) {
             e.preventDefault();
             lastPinchDistance = getDist(e.touches);
@@ -830,11 +872,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             isPanning = false; isDragging = false;
         }
-    }, { passive:false });
+    }
 
-    canvas.addEventListener('touchmove', e => {
-        // 常にブラウザデフォルトのスクロール・ピンチズームをブロック
-        e.preventDefault();
+    function onTouchMove(e) {
+        // 常にブラウザデフォルトのスクロール・ピンチズーム・pull-to-refreshをブロック
+        if (e.cancelable) e.preventDefault();
 
         if (e.touches.length === 1) {
             const t = e.touches[0];
@@ -843,15 +885,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const dx = t.clientX - lastTouchX;
             const dy = t.clientY - lastTouchY;
 
+            if (isPanning) {
+                // 指と等倍(1.0)でダイレクトに動かす
+                viewX += dx;
+                viewY += dy;
+                applyTransform();
+                updateVelocity(dx, dy, dt);
+                lastTouchX = t.clientX; lastTouchY = t.clientY;
+                lastTouchTime = now;
+                return;
+            }
+
             if (currentTool === 'move') {
                 if (isDragging && selectedShape) {
                     draw(e); // シェイプ移動
-                } else if (isPanning) {
-                    const panSpeed = 1.5;
-                    viewX += dx * panSpeed;
-                    viewY += dy * panSpeed;
-                    applyTransform();
-                    updateVelocity(dx * panSpeed, dy * panSpeed, dt);
                 }
                 lastTouchX = t.clientX; lastTouchY = t.clientY;
                 lastTouchTime = now;
@@ -861,11 +908,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // ペンシルツール: タッチ間を補間して滑らかにする
             if (currentTool === 'pencil' && isDrawing) {
                 const pos = clientToCanvas(t.clientX, t.clientY);
-                // 前回のポイントとの距離が大きい場合、中間ポイントを補間
                 if (currentPath.length > 0) {
                     const prev = currentPath[currentPath.length - 1];
                     const segDist = Math.hypot(pos.x - prev.x, pos.y - prev.y);
-                    const INTERPOLATION_THRESHOLD = 8; // この距離以上で補間
+                    const INTERPOLATION_THRESHOLD = 8;
                     if (segDist > INTERPOLATION_THRESHOLD) {
                         const steps = Math.ceil(segDist / INTERPOLATION_THRESHOLD);
                         for (let si = 1; si < steps; si++) {
@@ -879,28 +925,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 currentPath.push(pos);
                 lastPos = pos;
-                // rAF スロットルでプレビュー描画
                 schedulePreview({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
-            } else {
+            } else if (isDrawing) {
                 draw(e);
             }
             lastTouchX = t.clientX; lastTouchY = t.clientY;
-        } else if (e.touches.length === 2 && lastPinchDistance !== null) {
+        } else if (e.touches.length === 2 && lastPinchDistance !== null && lastPinchCenter !== null) {
             const d = getDist(e.touches), c = getCenter(e.touches);
-            const scale = 1 + (d / lastPinchDistance - 1) * 0.25;
+            const deltaX = c.x - lastPinchCenter.x;
+            const deltaY = c.y - lastPinchCenter.y;
             
-            // 重要: 2本指の中心点の動きをパンニング（移動）として反映
-            const panSpeed = 1.5;
-            viewX += (c.x - lastPinchCenter.x) * panSpeed;
-            viewY += (c.y - lastPinchCenter.y) * panSpeed;
+            // 指の距離比から新しいスケールを計算（ブレなくスムーズに吸い付く）
+            const scaleFactor = d / lastPinchDistance;
+            const oldS = viewScale;
+            const newScale = Math.max(0.1, Math.min(8.0, oldS * scaleFactor));
             
-            setZoom(viewScale * scale, c.x, c.y);
-            
-            lastPinchCenter = c; lastPinchDistance = d;
-        }
-    }, { passive:false });
+            // ズーム中心(c.x, c.y)を固定したままスケール変化と中心移動を同時に適用
+            const container = document.getElementById('canvas-container');
+            if (container && oldS > 0) {
+                const rect = container.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top  + rect.height / 2;
+                viewX += deltaX + (c.x - cx) * (1 - newScale / oldS);
+                viewY += deltaY + (c.y - cy) * (1 - newScale / oldS);
+                viewScale = currentZoom = newScale;
+                applyTransform();
+            }
 
-    canvas.addEventListener('touchend', e => {
+            lastPinchCenter = c;
+            lastPinchDistance = d;
+        }
+    }
+
+    function onTouchEnd(e) {
         if (isPanning) {
             isPanning = false;
             // 指を止めてから離した場合は慣性をリセット
@@ -909,9 +966,22 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             startMomentum();
         }
-        if (e.touches.length < 2) { lastPinchDistance = null; lastPinchCenter = null; }
-        if (e.touches.length === 0) { isPanning = false; stopDraw(); }
-    });
+        if (e.touches.length < 2) { 
+            lastPinchDistance = null; 
+            lastPinchCenter = null; 
+        }
+        if (e.touches.length === 0) { 
+            isPanning = false; 
+            stopDraw(); 
+        }
+    }
+
+    // キャンバスおよび余白エリア全体でタッチイベントを受け付ける
+    const touchTarget = canvasArea || canvas;
+    touchTarget.addEventListener('touchstart', onTouchStart, { passive: false });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', onTouchEnd, { passive: false });
 
     // Wheel Zoom & Pan (2-finger touchpad support on PC)
     document.querySelector('.canvas-area').addEventListener('wheel', e => {

@@ -46,6 +46,8 @@ body { background: var(--bg-main); color: var(--text-primary); overflow: hidden;
     overflow-y: hidden;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
 }
 .toolbar-row::-webkit-scrollbar { display: none; }
 
