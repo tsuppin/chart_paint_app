@@ -544,6 +544,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // 四角形または直線（水平線/垂直線/斜め線）を自動判別してシェイプを生成
+    function getRectOrLineShape(px, py, isAlt, isShift) {
+        const dx = px - startX;
+        const dy = py - startY;
+        const screenDx = Math.abs(dx) * viewScale;
+        const screenDy = Math.abs(dy) * viewScale;
+        const THRESHOLD = 14; // スクリーン上で14px以内のブレなら直線として自動補正
+
+        // Altキーが押されている場合は斜め直線
+        if (isAlt) {
+            return { type: 'line', x1: startX, y1: startY, x2: px, y2: py, color: currentColor, size: currentSize };
+        }
+
+        // 水平線: 縦の動きが小さく、横に引いた場合
+        if (screenDy <= THRESHOLD && screenDx > THRESHOLD) {
+            return { type: 'line', x1: startX, y1: startY, x2: px, y2: startY, color: currentColor, size: currentSize };
+        }
+
+        // 垂直線: 横の動きが小さく、縦に引いた場合
+        if (screenDx <= THRESHOLD && screenDy > THRESHOLD) {
+            return { type: 'line', x1: startX, y1: startY, x2: startX, y2: py, color: currentColor, size: currentSize };
+        }
+
+        // 四角形（通常）
+        let w = dx, h = dy;
+        if (isShift) {
+            const side = Math.max(Math.abs(w), Math.abs(h));
+            w = (w < 0 ? -1 : 1) * side;
+            h = (h < 0 ? -1 : 1) * side;
+        }
+        const rx = w < 0 ? startX + w : startX;
+        const ry = h < 0 ? startY + h : startY;
+        const rw = Math.abs(w);
+        const rh = Math.abs(h);
+
+        if (rw > 0 || rh > 0) {
+            if (rw > 0 && rh > 0) {
+                return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize };
+            } else {
+                return { type: 'line', x1: startX, y1: startY, x2: px, y2: py, color: currentColor, size: currentSize };
+            }
+        }
+        return null;
+    }
+
     function draw(e) {
         // マウスによるパンニング (e.button または MouseEvent 判定)
         if (isPanning && e instanceof MouseEvent) {
@@ -586,17 +631,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (currentTool === 'line') {
             schedulePreview({ type:'line', x1:startX, y1:startY, x2:pos.x, y2:pos.y, color:currentColor, size:currentSize });
         } else if (currentTool === 'rect') {
-            let w = pos.x - startX, h = pos.y - startY;
-            if (e.shiftKey) {
-                const side = Math.max(Math.abs(w), Math.abs(h));
-                w = (w < 0 ? -1 : 1) * side;
-                h = (h < 0 ? -1 : 1) * side;
-            }
-            const rx = w < 0 ? startX + w : startX;
-            const ry = h < 0 ? startY + h : startY;
-            const rw = Math.abs(w);
-            const rh = Math.abs(h);
-            if (rw > 0 && rh > 0) schedulePreview({ type:'rect', x:rx, y:ry, w:rw, h:rh, color:currentColor, size:currentSize });
+            const shape = getRectOrLineShape(pos.x, pos.y, e.altKey, e.shiftKey);
+            if (shape) schedulePreview(shape);
         }
     }
 
@@ -631,13 +667,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 composite(); saveUndoState();
             }
         } else if (currentTool === 'rect') {
-            let w = lastPos.x - startX, h = lastPos.y - startY;
-            const rx = w < 0 ? startX + w : startX;
-            const ry = h < 0 ? startY + h : startY;
-            const rw = Math.abs(w);
-            const rh = Math.abs(h);
-            if (rw > 0 && rh > 0) {
-                shapes.push({ type:'rect', x:rx, y:ry, w:rw, h:rh, color:currentColor, size:currentSize });
+            const shape = getRectOrLineShape(lastPos.x, lastPos.y, false, false);
+            if (shape) {
+                shapes.push(shape);
                 shapesCacheValid = false;
                 composite(); saveUndoState();
             }
@@ -702,7 +734,7 @@ document.addEventListener('DOMContentLoaded', () => {
             toolBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-text':'text','btn-move':'move'};
-            const lbl = {pencil:'Pencil',line:'Line',rect:'Rectangle',text:'Text',move:'Move'};
+            const lbl = {pencil:'Pencil',line:'Line',rect:'Rect / Line',text:'Text',move:'Move'};
             currentTool = map[btn.id] || 'pencil';
             document.getElementById('tool-status').innerText = `Mode: ${lbl[currentTool]}`;
             if (currentTool === 'move') {
