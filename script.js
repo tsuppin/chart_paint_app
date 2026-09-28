@@ -4,6 +4,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // baseCanvas = 背景画像のみ（描画内容は全て shapes[] で管理）
     const baseCanvas = document.createElement('canvas');
     const baseCtx = baseCanvas.getContext('2d');
+    // shapesCache = 確定済みシェイプのキャッシュ（高速再描画用）
+    // selectedShape を除く全シェイプを事前描画しておき、composite() で1枚の drawImage で済ませる
+    const shapesCache = document.createElement('canvas');
+    const shapesCacheCtx = shapesCache.getContext('2d');
 
     const dropZone    = document.getElementById('drop-zone');
     const imageInput  = document.getElementById('image-upload');
@@ -21,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
     let rafPending = false; // requestAnimationFrame 管理フラグ
+    let pendingPreview = null; // rAF で描画する最新プレビュー
 
     // Panning & Momentum (Transform-based)
     let isPanning = false; 
@@ -33,7 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // shapes 配列: 全描画オブジェクトを格納
     // pencil: { type:'pencil', points:[{x,y}...], color, size }
     // line:   { type:'line',   x1,y1,x2,y2, color, size }
-    // circle: { type:'circle', cx,cy,rx,ry,  color, size }
+    // rect:   { type:'rect',   x,y,w,h,     color, size }
     // text:   { type:'text',   text,x,y,     color, size }
     let shapes = [], selectedShape = null;
     let isDragging = false, dragStartX = 0, dragStartY = 0;
@@ -41,6 +46,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const MAX_UNDO = 30;
     let backgroundImage = null, currentZoom = 1.0;
     let lastPinchDistance = null, lastPinchCenter = null;
+
+    // === パフォーマンス最適化用 ===
+    let shapesCacheValid = false;       // shapesCache が最新かどうか
+    const parseColorCache = {};         // 色文字列 → {r,g,b,a} のキャッシュ
+    let lastBaseImageData = null;       // baseCanvas の ImageData 共有参照
+    let baseVersion = 0;                // baseCanvas の変更バージョン
 
     // === Transform ===
     function applyTransform() {
@@ -53,13 +64,10 @@ document.addEventListener('DOMContentLoaded', () => {
         viewScale = Math.max(0.1, Math.min(8.0, z));
         currentZoom = viewScale;
         if (screenX !== undefined && screenY !== undefined) {
-            // canvas-containerのtransform-originは要素中心なので、
-            // スクリーン座標 → コンテナ中心基準の相対座標へ変換して焦点固定計算
             const container = document.getElementById('canvas-container');
             const rect = container.getBoundingClientRect();
-            const cx = rect.left + rect.width / 2;  // 現在のコンテナ中心X(スクリーン)
-            const cy = rect.top  + rect.height / 2; // 現在のコンテナ中心Y(スクリーン)
-            // 焦点に対して: scale変化分だけコンテナ中心を動かす
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top  + rect.height / 2;
             viewX += (screenX - cx) * (1 - viewScale / oldS);
             viewY += (screenY - cy) * (1 - viewScale / oldS);
         }
@@ -72,26 +80,66 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Canvas Init ===
     function initCanvas() {
         const mob = window.innerWidth <= 768;
-        canvas.width = baseCanvas.width = mob ? 600 : 800;
-        canvas.height = baseCanvas.height = mob ? 900 : 800;
+        const w = mob ? 600 : 800;
+        const h = mob ? 900 : 800;
+        canvas.width = baseCanvas.width = shapesCache.width = w;
+        canvas.height = baseCanvas.height = shapesCache.height = h;
         canvas.style.touchAction = 'none';
         canvas.style.cursor = 'crosshair';
         baseCtx.fillStyle = '#ffffff';
-        baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
+        baseCtx.fillRect(0, 0, w, h);
         shapes = []; selectedShape = null; currentPath = [];
         currentZoom = viewScale = 1.0; viewX = 0; viewY = 0;
         applyTransform();
-        undoStack = []; saveUndoState();
+        shapesCacheValid = false;
+        undoStack = [];
+        updateBaseSnapshot();
+        saveUndoState();
         composite(); 
     }
     initCanvas();
 
-    // === Composite: baseCanvas + 全シェイプ → メインキャンバス ===
+    // === Composite: baseCanvas + キャッシュ済みシェイプ + プレビュー → メインキャンバス ===
+    // 確定済みシェイプはオフスクリーンの shapesCache に描画済みのものを使い回す。
+    // これにより、毎フレーム全シェイプを再描画する必要がなくなる。
     function composite(preview) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(baseCanvas, 0, 0);
-        shapes.forEach(s => drawObj(ctx, s, s === selectedShape));
+
+        // キャッシュが無効なら再構築（selectedShape は除外）
+        if (!shapesCacheValid) {
+            shapesCacheCtx.clearRect(0, 0, shapesCache.width, shapesCache.height);
+            for (let i = 0; i < shapes.length; i++) {
+                if (shapes[i] !== selectedShape) {
+                    drawObj(shapesCacheCtx, shapes[i], false);
+                }
+            }
+            shapesCacheValid = true;
+        }
+
+        // キャッシュ画像を1回の drawImage で描画（O(1)）
+        ctx.drawImage(shapesCache, 0, 0);
+
+        // 選択中のシェイプはハイライト付きで個別描画
+        if (selectedShape) drawObj(ctx, selectedShape, true);
+
+        // プレビュー（描画中のシェイプ）
         if (preview) drawObj(ctx, preview, false);
+    }
+
+    // === rAF スロットル付きプレビュー描画 ===
+    // mousemove / touchmove の高頻度イベントを間引いて、
+    // ディスプレイのリフレッシュレートに合わせた描画にする
+    function schedulePreview(preview) {
+        pendingPreview = preview;
+        if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(() => {
+                if (pendingPreview) composite(pendingPreview);
+                pendingPreview = null;
+                rafPending = false;
+            });
+        }
     }
 
     // === Pencil texture helpers ===
@@ -129,12 +177,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 色文字列をRGBA成分に分解
+    // 色文字列をRGBA成分に分解（キャッシュ付き）
+    // 以前: 毎回 Canvas 要素を生成 → getImageData で色分解（非常に重い）
+    // 改善: 一度パースした結果をキャッシュし、同じ色は即座に返す
     function parseColor(c) {
+        if (parseColorCache[c]) return parseColorCache[c];
         const d = document.createElement('canvas'); d.width = d.height = 1;
         const x = d.getContext('2d'); x.fillStyle = c; x.fillRect(0,0,1,1);
         const [r,g,b,a] = x.getImageData(0,0,1,1).data;
-        return {r,g,b,a};
+        parseColorCache[c] = {r,g,b,a};
+        return parseColorCache[c];
     }
 
     // 鉛筆風ストロークを描画（シンプル半透明・ベジェ曲線補間）
@@ -193,18 +245,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return pts;
     }
 
-    // 楕円をポイント列に変換（鉛筆テクスチャ適用用）
-    function ellipseToPoints(cx, cy, rx, ry) {
-        const circumference = Math.PI * (3 * (rx + ry) - Math.sqrt((3 * rx + ry) * (rx + 3 * ry)));
-        const steps = Math.max(24, Math.round(circumference / 3));
-        const pts = [];
-        for (let i = 0; i <= steps; i++) {
-            const angle = (i / steps) * 2 * Math.PI;
-            pts.push({ x: cx + rx * Math.cos(angle), y: cy + ry * Math.sin(angle) });
-        }
-        return pts;
-    }
-
     function drawObj(tc, s, sel) {
         tc.save();
         if (sel && s.type === 'text') { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
@@ -216,9 +256,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const pts = lineToPoints(s.x1, s.y1, s.x2, s.y2);
             drawPencilStroke(tc, pts, s.color, s.size, sel);
 
-        } else if (s.type === 'circle') {
-            const pts = ellipseToPoints(s.cx, s.cy, s.rx, s.ry);
-            drawPencilStroke(tc, pts, s.color, s.size, sel);
+        } else if (s.type === 'rect') {
+            const { x, y, w, h, color, size } = s;
+            const edges = [
+                lineToPoints(x, y, x + w, y),
+                lineToPoints(x + w, y, x + w, y + h),
+                lineToPoints(x + w, y + h, x, y + h),
+                lineToPoints(x, y + h, x, y)
+            ];
+            edges.forEach(pts => drawPencilStroke(tc, pts, color, size, sel));
 
         } else if (s.type === 'text') {
             const fontSize = s.size * 4;
@@ -246,21 +292,37 @@ document.addEventListener('DOMContentLoaded', () => {
     function cloneShapes(arr) {
         return arr.map(s => s.type === 'pencil' ? {...s, points: s.points.map(p=>({...p}))} : {...s});
     }
+
+    // baseCanvas が変更されたときだけ ImageData をスナップショット
+    function updateBaseSnapshot() {
+        baseVersion++;
+        lastBaseImageData = cloneID(baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height));
+    }
+
     function saveUndoState() {
         undoStack.push({
-            base: cloneID(baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height)),
+            base: lastBaseImageData,  // 共有参照（base が変わらない限りコピー不要）
+            baseVer: baseVersion,
             shapes: cloneShapes(shapes)
         });
         if (undoStack.length > MAX_UNDO) undoStack.shift();
+        shapesCacheValid = false;
         updateUndoBtn();
     }
+
     function undo() {
         if (undoStack.length <= 1) return;
         undoStack.pop();
         const p = undoStack[undoStack.length - 1];
-        baseCtx.putImageData(cloneID(p.base), 0, 0);
+        // base が異なるバージョンの場合のみ復元
+        if (p.baseVer !== baseVersion) {
+            baseCtx.putImageData(cloneID(p.base), 0, 0);
+            baseVersion = p.baseVer;
+            lastBaseImageData = p.base;
+        }
         shapes = cloneShapes(p.shapes);
         selectedShape = null;
+        shapesCacheValid = false;
         composite();
         updateUndoBtn();
     }
@@ -286,9 +348,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } else if (s.type === 'line') {
                 if (distToSeg(px, py, s.x1, s.y1, s.x2, s.y2) <= thr) return s;
-            } else if (s.type === 'circle') {
-                const nd = Math.hypot((px-s.cx)/s.rx, (py-s.cy)/s.ry);
-                if (Math.abs(nd - 1) <= thr / Math.min(s.rx, s.ry)) return s;
+            } else if (s.type === 'rect') {
+                const { x, y, w, h } = s;
+                const edges = [
+                    [x, y, x + w, y],
+                    [x + w, y, x + w, y + h],
+                    [x + w, y + h, x, y + h],
+                    [x, y + h, x, y]
+                ];
+                if (edges.some(([x1, y1, x2, y2]) => distToSeg(px, py, x1, y1, x2, y2) <= thr)) return s;
             } else if (s.type === 'text') {
                 const fontSize = s.size * 4;
                 const lineH = fontSize * 1.2;
@@ -303,7 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function moveShape(s, dx, dy) {
         if (s.type === 'line')   { s.x1+=dx; s.y1+=dy; s.x2+=dx; s.y2+=dy; }
-        if (s.type === 'circle') { s.cx+=dx; s.cy+=dy; }
+        if (s.type === 'rect')   { s.x+=dx; s.y+=dy; }
         if (s.type === 'pencil') { s.points = s.points.map(p => ({x:p.x+dx, y:p.y+dy})); }
         if (s.type === 'text')   { s.x+=dx; s.y+=dy; }
     }
@@ -345,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (input.value && input.value !== input.placeholder) {
                 // テキストをシェイプオブジェクトとして格納（移動可能）
                 shapes.push({ type:'text', text:input.value, x, y:y+currentSize*3, color:currentColor, size:currentSize });
+                shapesCacheValid = false;
                 composite(); saveUndoState();
             }
             msr.remove(); input.remove();
@@ -384,10 +453,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const pos = getPos(e); lastPos = pos;
         
         // --- PC/マウス操作のパン開始 ---
-        // ミドルクリックまたは移動ツールで背景をクリックした場合
+        // 右クリック(button===2)またはミドルクリック(button===1)はどのツールでも画像パンを開始
+        // 移動ツールで背景を左クリックした場合もパン
         if (e.button !== undefined) {
-             if (e.button === 1 || (currentTool === 'move' && e.button === 0)) {
-                const hit = (e.button === 1) ? null : hitTest(pos.x, pos.y);
+            if (e.button === 2 || e.button === 1) {
+                isPanning = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                canvas.style.cursor = 'move';
+                return;
+            }
+            if (currentTool === 'move' && e.button === 0) {
+                const hit = hitTest(pos.x, pos.y);
                 if (!hit) {
                     isPanning = true;
                     lastMouseX = e.clientX;
@@ -396,14 +473,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
             }
+            // 左クリック(0)以外では描画を開始しない
+            if (e.button !== 0) return;
         }
 
         if (currentTool === 'text') { addTextInput(pos.x, pos.y); return; }
         if (currentTool === 'move') {
             const hit = hitTest(pos.x, pos.y);
+            const prevSelected = selectedShape;
             selectedShape = hit || null; isDragging = !!hit;
             dragStartX = pos.x; dragStartY = pos.y;
             canvas.style.cursor = hit ? 'grabbing' : 'default';
+            // 選択状態が変わったらキャッシュ無効化（選択シェイプはキャッシュ対象外のため）
+            if (prevSelected !== selectedShape) shapesCacheValid = false;
             composite(); return;
         }
         isDrawing = true; startX = pos.x; startY = pos.y;
@@ -430,26 +512,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dy = pos.y - dragStartY;
                 dragStartX = pos.x; dragStartY = pos.y;
                 moveShape(selectedShape, dx, dy);
+                // selectedShape はキャッシュに含まれないため、キャッシュは有効のまま
                 if (!rafPending) {
                     rafPending = true;
                     requestAnimationFrame(() => { composite(); rafPending = false; });
                 }
             } else if (!isDragging) {
-                canvas.style.cursor = hitTest(pos.x, pos.y) ? 'move' : 'default';
+                if (e.target === canvas) canvas.style.cursor = hitTest(pos.x, pos.y) ? 'move' : 'default';
             }
             return;
         }
         if (!isDrawing) return;
         lastPos = pos;
+
+        // ペンシルのポイントは同期的に追加（全 mousemove イベントを捕捉）
         if (currentTool === 'pencil') {
             currentPath.push(pos);
-            composite({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
+        }
+
+        // プレビュー描画は rAF でスロットル
+        if (currentTool === 'pencil') {
+            schedulePreview({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
         } else if (currentTool === 'line') {
-            composite({ type:'line', x1:startX, y1:startY, x2:pos.x, y2:pos.y, color:currentColor, size:currentSize });
-        } else if (currentTool === 'circle') {
-            let rx = Math.abs(pos.x-startX), ry = Math.abs(pos.y-startY);
-            if (e.shiftKey) { const r = Math.max(rx,ry); rx=r; ry=r; }
-            if (rx>0&&ry>0) composite({ type:'circle', cx:startX, cy:startY, rx, ry, color:currentColor, size:currentSize });
+            schedulePreview({ type:'line', x1:startX, y1:startY, x2:pos.x, y2:pos.y, color:currentColor, size:currentSize });
+        } else if (currentTool === 'rect') {
+            let w = pos.x - startX, h = pos.y - startY;
+            if (e.shiftKey) {
+                const side = Math.max(Math.abs(w), Math.abs(h));
+                w = (w < 0 ? -1 : 1) * side;
+                h = (h < 0 ? -1 : 1) * side;
+            }
+            const rx = w < 0 ? startX + w : startX;
+            const ry = h < 0 ? startY + h : startY;
+            const rw = Math.abs(w);
+            const rh = Math.abs(h);
+            if (rw > 0 && rh > 0) schedulePreview({ type:'rect', x:rx, y:ry, w:rw, h:rh, color:currentColor, size:currentSize });
         }
     }
 
@@ -460,7 +557,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (currentTool === 'move') {
-            if (isDragging && selectedShape) saveUndoState();
+            if (isDragging && selectedShape) {
+                shapesCacheValid = false;
+                saveUndoState();
+            }
             isDragging = false;
             canvas.style.cursor = selectedShape ? 'move' : 'default';
             return;
@@ -470,18 +570,25 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentTool === 'pencil') {
             if (currentPath.length >= 2) {
                 shapes.push({ type:'pencil', points:[...currentPath], color:currentColor, size:currentSize });
+                shapesCacheValid = false;
                 composite(); saveUndoState();
             }
             currentPath = [];
         } else if (currentTool === 'line') {
             if (lastPos.x !== startX || lastPos.y !== startY) {
                 shapes.push({ type:'line', x1:startX, y1:startY, x2:lastPos.x, y2:lastPos.y, color:currentColor, size:currentSize });
+                shapesCacheValid = false;
                 composite(); saveUndoState();
             }
-        } else if (currentTool === 'circle') {
-            const rx = Math.abs(lastPos.x-startX), ry = Math.abs(lastPos.y-startY);
-            if (rx>0&&ry>0) {
-                shapes.push({ type:'circle', cx:startX, cy:startY, rx, ry, color:currentColor, size:currentSize });
+        } else if (currentTool === 'rect') {
+            let w = lastPos.x - startX, h = lastPos.y - startY;
+            const rx = w < 0 ? startX + w : startX;
+            const ry = h < 0 ? startY + h : startY;
+            const rw = Math.abs(w);
+            const rh = Math.abs(h);
+            if (rw > 0 && rh > 0) {
+                shapes.push({ type:'rect', x:rx, y:ry, w:rw, h:rh, color:currentColor, size:currentSize });
+                shapesCacheValid = false;
                 composite(); saveUndoState();
             }
         }
@@ -500,15 +607,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const MAX = 3000;
                 let w = img.width, h = img.height;
                 if (w>MAX){h*=MAX/w;w=MAX;} if (h>MAX){w*=MAX/h;h=MAX;}
-                canvas.width = baseCanvas.width = Math.round(w);
-                canvas.height = baseCanvas.height = Math.round(h);
+                canvas.width = baseCanvas.width = shapesCache.width = Math.round(w);
+                canvas.height = baseCanvas.height = shapesCache.height = Math.round(h);
                 baseCtx.drawImage(img, 0, 0, Math.round(w), Math.round(h));
                 shapes = []; selectedShape = null; currentPath = [];
                 // ビューをリセット
                 viewScale = currentZoom = 1.0; viewX = 0; viewY = 0;
                 velX = 0; velY = 0; stopMomentum(); // 慣性もリセット
                 applyTransform();
-                undoStack = []; saveUndoState();
+                shapesCacheValid = false;
+                undoStack = [];
+                updateBaseSnapshot();
+                saveUndoState();
                 composite();
                 dropZone.classList.add('hidden');
             };
@@ -533,6 +643,8 @@ document.addEventListener('DOMContentLoaded', () => {
             baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
         }
         shapes = []; selectedShape = null; currentPath = [];
+        shapesCacheValid = false;
+        updateBaseSnapshot();
         composite(); saveUndoState();
     }
 
@@ -541,15 +653,21 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => {
             toolBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            const map = {'btn-pencil':'pencil','btn-line':'line','btn-circle':'circle','btn-text':'text','btn-move':'move'};
-            const lbl = {pencil:'Pencil',line:'Line',circle:'Circle',text:'Text',move:'Move'};
+            const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-text':'text','btn-move':'move'};
+            const lbl = {pencil:'Pencil',line:'Line',rect:'Rectangle',text:'Text',move:'Move'};
             currentTool = map[btn.id] || 'pencil';
             document.getElementById('tool-status').innerText = `Mode: ${lbl[currentTool]}`;
             if (currentTool === 'move') {
+                if (selectedShape) shapesCacheValid = false;
                 selectedShape = null; composite();
                 canvas.style.cursor = 'default';
                 canvas.style.touchAction = 'none'; // 移動ツールも pan は不要
             } else {
+                if (selectedShape) {
+                    selectedShape = null;
+                    shapesCacheValid = false;
+                    composite();
+                }
                 canvas.style.touchAction = 'none';
                 canvas.style.cursor = 'crosshair';
             }
@@ -597,7 +715,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if ((e.ctrlKey||e.metaKey) && e.key==='z') { e.preventDefault(); undo(); }
         if ((e.key==='Delete'||e.key==='Backspace') && selectedShape && currentTool==='move') {
             shapes = shapes.filter(s => s !== selectedShape);
-            selectedShape = null; composite(); saveUndoState();
+            selectedShape = null;
+            shapesCacheValid = false;
+            composite(); saveUndoState();
         }
     });
 
@@ -621,8 +741,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Mouse
     canvas.addEventListener('mousedown', startDraw);
-    canvas.addEventListener('mousemove', draw);
+    window.addEventListener('mousemove', draw);
     window.addEventListener('mouseup', stopDraw);
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    // キャンバス外側のエリアでも右クリックまたはホイールクリックで画像全体をドラッグ移動可能に
+    const canvasArea = document.querySelector('.canvas-area');
+    if (canvasArea) {
+        canvasArea.addEventListener('mousedown', e => {
+            if (e.target !== canvas && (e.button === 2 || e.button === 1)) {
+                isPanning = true;
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+                canvas.style.cursor = 'move';
+            }
+        });
+        canvasArea.addEventListener('contextmenu', e => e.preventDefault());
+    }
 
     // --- Momentum Panning ---
     function stopMomentum() { if (momentumID) { cancelAnimationFrame(momentumID); momentumID = null; } }
@@ -664,14 +799,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const pos = getPos(e);
                 const hit = hitTest(pos.x, pos.y);
                 if (hit) {
+                    const prevSelected = selectedShape;
                     selectedShape = hit; isDragging = true;
                     dragStartX = pos.x; dragStartY = pos.y;
                     canvas.style.cursor = 'grabbing';
+                    if (prevSelected !== selectedShape) shapesCacheValid = false;
                     composite();
                 } else {
                     // 背景タッチならパンモードへ
+                    const prevSelected = selectedShape;
                     selectedShape = null; isDragging = false;
                     isPanning = true;
+                    if (prevSelected !== null) shapesCacheValid = false;
                     composite();
                 }
                 return;
@@ -740,7 +879,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 currentPath.push(pos);
                 lastPos = pos;
-                composite({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
+                // rAF スロットルでプレビュー描画
+                schedulePreview({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
             } else {
                 draw(e);
             }
