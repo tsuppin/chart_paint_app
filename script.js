@@ -77,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const getDist   = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
     const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
-    // 画面サイズに合わせてキャンバスを自動フィット＆上寄りに配置
+    // 画面サイズに合わせて画郭の「左上」を起点に配置＆小さくなりすぎないよう調整
     function fitToScreen() {
         const area = document.querySelector('.canvas-area');
         if (!area || canvas.width === 0 || canvas.height === 0) return;
@@ -89,28 +89,32 @@ document.addEventListener('DOMContentLoaded', () => {
         let scale;
 
         if (isMobile) {
-            // スマホでは横幅に合わせて大きく表示（左右余白16px）
-            // チャートや文字が見やすく、すぐ描画・確認できるようにする
-            const paddingX = 16;
-            scale = (areaW - paddingX) / canvas.width;
-            scale = Math.max(0.15, Math.min(2.5, scale));
+            // スマホ: 縮小されすぎて文字やチャートが読めなくなるのを防ぐ
+            // 画面幅基準と0.85のうち小さくなりすぎない値を採用
+            const fitW = (areaW - 16) / canvas.width;
+            scale = Math.max(0.85, Math.min(1.2, fitW));
+            // 元画像がスマホ幅以下の場合は原寸(1.0)
+            if (canvas.width <= areaW) scale = 1.0;
         } else {
-            // PCでは適度な余白を持ちつつ画面内に収める
-            const paddingX = 48;
-            const paddingY = 48;
-            const scaleW = (areaW - paddingX) / canvas.width;
-            const scaleH = (areaH - paddingY) / canvas.height;
-            scale = Math.min(scaleW, scaleH);
-            scale = Math.max(0.2, Math.min(1.5, scale));
+            // PC: 画像が小さくなりすぎないよう原寸(1.0)〜下限0.8で大きく表示
+            const fitW = (areaW - 32) / canvas.width;
+            const fitH = (areaH - 32) / canvas.height;
+            const fitScale = Math.min(fitW, fitH);
+            scale = Math.max(0.8, Math.min(1.0, fitScale));
+            // 画面内に収まる画像は原寸(1.0)
+            if (canvas.width <= areaW - 32 && canvas.height <= areaH - 32) scale = 1.0;
         }
 
         viewScale = currentZoom = scale;
 
-        // 垂直位置: 画面中央（おへそ位置）に寄りすぎるのを防ぎ、ツールバーのすぐ下（上寄り）に配置
+        // 画郭（.canvas-area）の「左上」を起点として配置
+        const scaledW = canvas.width * scale;
         const scaledH = canvas.height * scale;
-        const topMargin = isMobile ? 14 : 24;
-        viewY = topMargin - (areaH - scaledH) / 2;
-        viewX = 0; // 水平方向は中央揃え
+        const targetLeft = isMobile ? 8 : 16;
+        const targetTop  = isMobile ? 8 : 16;
+
+        viewX = targetLeft - (areaW - scaledW) / 2;
+        viewY = targetTop  - (areaH - scaledH) / 2;
 
         velX = 0;
         velY = 0;
