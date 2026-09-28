@@ -77,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const getDist   = t => Math.hypot(t[0].clientX-t[1].clientX, t[0].clientY-t[1].clientY);
     const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
-    // 画面サイズに合わせてキャンバスを自動フィット
+    // 画面サイズに合わせてキャンバスを自動フィット＆上寄りに配置
     function fitToScreen() {
         const area = document.querySelector('.canvas-area');
         if (!area || canvas.width === 0 || canvas.height === 0) return;
@@ -85,15 +85,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const areaH = area.clientHeight;
         if (areaW === 0 || areaH === 0) return;
 
-        const paddingRatio = 0.92;
-        const scaleW = (areaW * paddingRatio) / canvas.width;
-        const scaleH = (areaH * paddingRatio) / canvas.height;
-        let scale = Math.min(scaleW, scaleH);
-        scale = Math.max(0.1, Math.min(2.0, scale));
+        const isMobile = window.innerWidth <= 768;
+        let scale;
+
+        if (isMobile) {
+            // スマホでは横幅に合わせて大きく表示（左右余白16px）
+            // チャートや文字が見やすく、すぐ描画・確認できるようにする
+            const paddingX = 16;
+            scale = (areaW - paddingX) / canvas.width;
+            scale = Math.max(0.15, Math.min(2.5, scale));
+        } else {
+            // PCでは適度な余白を持ちつつ画面内に収める
+            const paddingX = 48;
+            const paddingY = 48;
+            const scaleW = (areaW - paddingX) / canvas.width;
+            const scaleH = (areaH - paddingY) / canvas.height;
+            scale = Math.min(scaleW, scaleH);
+            scale = Math.max(0.2, Math.min(1.5, scale));
+        }
 
         viewScale = currentZoom = scale;
-        viewX = 0;
-        viewY = 0;
+
+        // 垂直位置: 画面中央（おへそ位置）に寄りすぎるのを防ぎ、ツールバーのすぐ下（上寄り）に配置
+        const scaledH = canvas.height * scale;
+        const topMargin = isMobile ? 14 : 24;
+        viewY = topMargin - (areaH - scaledH) / 2;
+        viewX = 0; // 水平方向は中央揃え
+
         velX = 0;
         velY = 0;
         stopMomentum();
