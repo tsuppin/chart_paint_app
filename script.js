@@ -24,6 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTool = 'pencil', currentColor = '#ffffff', currentSize = 3;
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
+    let dragTrajectory = []; // rect描画時の軌跡点列（直線性判定用）
+    let rectSubMode = 'auto'; // 'auto' | 'line' | 'rect'
+    let lastKeyModifiers = { alt: false, shift: false };
     let rafPending = false; // requestAnimationFrame 管理フラグ
     let pendingPreview = null; // rAF で描画する最新プレビュー
 
@@ -559,52 +562,134 @@ document.addEventListener('DOMContentLoaded', () => {
         isDrawing = true; startX = pos.x; startY = pos.y;
         if (currentTool === 'pencil') {
             currentPath = [{x:startX, y:startY}];
+        } else if (currentTool === 'rect') {
+            dragTrajectory = [{x:startX, y:startY}];
         }
     }
 
-    // 四角形または直線（水平線/垂直線/斜め線）を自動判別してシェイプを生成
-    function getRectOrLineShape(px, py, isAlt, isShift) {
-        const dx = px - startX;
-        const dy = py - startY;
+    // 弱めのマグネット（水平・垂直・45度への吸着）
+    function applyMagnet(x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
         const screenDx = Math.abs(dx) * viewScale;
         const screenDy = Math.abs(dy) * viewScale;
-        const THRESHOLD = 14; // スクリーン上で14px以内のブレなら直線として自動補正
+        const dist = Math.hypot(dx, dy);
+        const screenDist = dist * viewScale;
 
-        // Altキーが押されている場合は斜め直線
-        if (isAlt) {
-            return { type: 'line', x1: startX, y1: startY, x2: px, y2: py, color: currentColor, size: currentSize };
+        // 微小移動はそのまま
+        if (screenDist < 5) return { x: x2, y: y2, snapped: null };
+
+        // 角度 (-180 ~ 180度)
+        const rad = Math.atan2(dy, dx);
+        const deg = rad * (180 / Math.PI);
+        const absDeg = Math.abs(deg);
+
+        // 水平マグネット: 水平からの角度差が 7.5度以内、または画面上のYブレが 13px 以内（弱めの吸着）
+        const diffHoriz = Math.min(absDeg, Math.abs(180 - absDeg));
+        if (diffHoriz <= 7.5 || (screenDy <= 13 && screenDx > 15)) {
+            return { x: x2, y: y1, snapped: 'horizontal', angle: absDeg < 90 ? 0 : 180 };
         }
 
-        // 水平線: 縦の動きが小さく、横に引いた場合
-        if (screenDy <= THRESHOLD && screenDx > THRESHOLD) {
-            return { type: 'line', x1: startX, y1: startY, x2: px, y2: startY, color: currentColor, size: currentSize };
+        // 垂直マグネット: 垂直からの角度差が 7.5度以内、または画面上のXブレが 13px 以内（弱めの吸着）
+        const diffVert = Math.abs(90 - absDeg);
+        if (diffVert <= 7.5 || (screenDx <= 13 && screenDy > 15)) {
+            return { x: x1, y: y2, snapped: 'vertical', angle: deg >= 0 ? 90 : -90 };
         }
 
-        // 垂直線: 横の動きが小さく、縦に引いた場合
-        if (screenDx <= THRESHOLD && screenDy > THRESHOLD) {
-            return { type: 'line', x1: startX, y1: startY, x2: startX, y2: py, color: currentColor, size: currentSize };
+        // 45度マグネット: 45度系からの角度差が 4.5度以内（ほんのり吸着）
+        const diff45 = Math.min(Math.abs(45 - absDeg), Math.abs(135 - absDeg));
+        if (diff45 <= 4.5) {
+            const signX = dx >= 0 ? 1 : -1;
+            const signY = dy >= 0 ? 1 : -1;
+            const avg = (Math.abs(dx) + Math.abs(dy)) / 2;
+            return { x: x1 + signX * avg, y: y1 + signY * avg, snapped: 'diagonal45', angle: 45 };
         }
 
-        // 四角形（通常）
-        let w = dx, h = dy;
+        // 吸着なし: 自由な角度（斜め）
+        return { x: x2, y: y2, snapped: null };
+    }
+
+    function makeRectShape(x1, y1, x2, y2, isShift) {
+        let w = x2 - x1, h = y2 - y1;
         if (isShift) {
             const side = Math.max(Math.abs(w), Math.abs(h));
             w = (w < 0 ? -1 : 1) * side;
             h = (h < 0 ? -1 : 1) * side;
         }
-        const rx = w < 0 ? startX + w : startX;
-        const ry = h < 0 ? startY + h : startY;
+        const rx = w < 0 ? x1 + w : x1;
+        const ry = h < 0 ? y1 + h : y1;
         const rw = Math.abs(w);
         const rh = Math.abs(h);
-
-        if (rw > 0 || rh > 0) {
-            if (rw > 0 && rh > 0) {
-                return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize };
-            } else {
-                return { type: 'line', x1: startX, y1: startY, x2: px, y2: py, color: currentColor, size: currentSize };
-            }
+        if (rw > 0 && rh > 0) {
+            return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize };
         }
         return null;
+    }
+
+    // 四角形または直線（水平線/垂直線/斜め線）を自動判別してシェイプを生成
+    function getRectOrLineShape(px, py, isAlt, isShift) {
+        // マグネット吸着を適用
+        const mag = applyMagnet(startX, startY, px, py);
+        const curX = mag.x;
+        const curY = mag.y;
+
+        const dx = curX - startX;
+        const dy = curY - startY;
+        const screenDx = Math.abs(dx) * viewScale;
+        const screenDy = Math.abs(dy) * viewScale;
+        const screenDist = Math.hypot(dx, dy) * viewScale;
+
+        if (screenDist < 4) return null;
+
+        // Altキーまたは直線サブモードなら無条件に直線
+        if (isAlt || rectSubMode === 'line') {
+            return { type: 'line', x1: startX, y1: startY, x2: curX, y2: curY, color: currentColor, size: currentSize };
+        }
+
+        // 四角サブモードなら無条件に四角形
+        if (rectSubMode === 'rect') {
+            return makeRectShape(startX, startY, curX, curY, isShift);
+        }
+
+        // --- スマート自動判別 (rectSubMode === 'auto') ---
+
+        // 1. 水平マグネット吸着時 → 水平線
+        if (mag.snapped === 'horizontal') {
+            return { type: 'line', x1: startX, y1: startY, x2: curX, y2: startY, color: currentColor, size: currentSize };
+        }
+
+        // 2. 垂直マグネット吸着時 → 垂直線
+        if (mag.snapped === 'vertical') {
+            return { type: 'line', x1: startX, y1: startY, x2: startX, y2: curY, color: currentColor, size: currentSize };
+        }
+
+        // 3. 45度マグネット吸着時 → 45度直線（Shiftがなければ線）
+        if (mag.snapped === 'diagonal45' && !isShift) {
+            return { type: 'line', x1: startX, y1: startY, x2: curX, y2: curY, color: currentColor, size: currentSize };
+        }
+
+        // 4. 斜めの場合: ドラッグ軌跡の直交オフセット（薄さ）を判定
+        let maxDeviation = 0;
+        const lineLen = Math.hypot(dx, dy);
+        if (lineLen > 0 && dragTrajectory.length > 2) {
+            for (let i = 0; i < dragTrajectory.length; i++) {
+                const p = dragTrajectory[i];
+                const dev = Math.abs((p.x - startX) * dy - (p.y - startY) * dx) / lineLen;
+                if (dev > maxDeviation) maxDeviation = dev;
+            }
+        }
+        const screenDeviation = maxDeviation * viewScale;
+        const minScreenSide = Math.min(screenDx, screenDy);
+
+        // 直線的ストローク（軌跡のブレが小さい）、または薄いドラッグなら「斜め直線（トレンドライン）」
+        const isLine = (minScreenSide <= 16 || screenDeviation <= 14) && !isShift;
+
+        if (isLine) {
+            return { type: 'line', x1: startX, y1: startY, x2: curX, y2: curY, color: currentColor, size: currentSize };
+        }
+
+        // しっかり広げた場合は四角形ボックス
+        return makeRectShape(startX, startY, curX, curY, isShift);
     }
 
     function draw(e) {
@@ -637,6 +722,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!isDrawing) return;
         lastPos = pos;
+        lastKeyModifiers = { alt: !!e.altKey, shift: !!e.shiftKey };
 
         // ペンシルのポイントは同期的に追加（全 mousemove イベントを捕捉）
         if (currentTool === 'pencil') {
@@ -647,8 +733,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentTool === 'pencil') {
             schedulePreview({ type:'pencil', points:currentPath, color:currentColor, size:currentSize });
         } else if (currentTool === 'line') {
-            schedulePreview({ type:'line', x1:startX, y1:startY, x2:pos.x, y2:pos.y, color:currentColor, size:currentSize });
+            const mag = applyMagnet(startX, startY, pos.x, pos.y);
+            schedulePreview({ type:'line', x1:startX, y1:startY, x2:mag.x, y2:mag.y, color:currentColor, size:currentSize });
         } else if (currentTool === 'rect') {
+            dragTrajectory.push(pos);
             const shape = getRectOrLineShape(pos.x, pos.y, e.altKey, e.shiftKey);
             if (shape) schedulePreview(shape);
         }
@@ -679,18 +767,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             currentPath = [];
         } else if (currentTool === 'line') {
-            if (lastPos.x !== startX || lastPos.y !== startY) {
-                shapes.push({ type:'line', x1:startX, y1:startY, x2:lastPos.x, y2:lastPos.y, color:currentColor, size:currentSize });
+            const mag = applyMagnet(startX, startY, lastPos.x, lastPos.y);
+            if (mag.x !== startX || mag.y !== startY) {
+                shapes.push({ type:'line', x1:startX, y1:startY, x2:mag.x, y2:mag.y, color:currentColor, size:currentSize });
                 shapesCacheValid = false;
                 composite(); saveUndoState();
             }
         } else if (currentTool === 'rect') {
-            const shape = getRectOrLineShape(lastPos.x, lastPos.y, false, false);
+            dragTrajectory.push(lastPos);
+            const shape = getRectOrLineShape(lastPos.x, lastPos.y, lastKeyModifiers.alt, lastKeyModifiers.shift);
             if (shape) {
                 shapes.push(shape);
                 shapesCacheValid = false;
                 composite(); saveUndoState();
             }
+            dragTrajectory = [];
         }
     }
 
@@ -746,15 +837,51 @@ document.addEventListener('DOMContentLoaded', () => {
         composite(); saveUndoState();
     }
 
+    function updateToolStatusUI() {
+        const lbl = { pencil: 'Pencil', line: 'Line (Magnet)', rect: 'Rect / Line', text: 'Text', move: 'Move' };
+        let statusText = `Mode: ${lbl[currentTool] || currentTool}`;
+        const rectBtn = document.getElementById('btn-rect');
+        const lineBtn = document.getElementById('btn-line');
+
+        if (lineBtn) lineBtn.title = '直線 (弱めマグネット: 水平/垂直/45°)';
+
+        if (currentTool === 'rect') {
+            if (rectSubMode === 'auto') {
+                statusText = 'Mode: □ / ／ (Auto Magnet)';
+                if (rectBtn) rectBtn.title = '四角 / 線 (自動マグネット - 再タップで直線固定)';
+            } else if (rectSubMode === 'line') {
+                statusText = 'Mode: Line (Magnet)';
+                if (rectBtn) rectBtn.title = '直線 (マグネット固定 - 再タップで四角固定)';
+            } else if (rectSubMode === 'rect') {
+                statusText = 'Mode: Rectangle';
+                if (rectBtn) rectBtn.title = '四角形 (固定 - 再タップで自動判別)';
+            }
+        }
+
+        const el = document.getElementById('tool-status');
+        if (el) el.innerText = statusText;
+    }
+
     // === Event Listeners ===
     toolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            toolBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
             const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-text':'text','btn-move':'move'};
-            const lbl = {pencil:'Pencil',line:'Line',rect:'Rect / Line',text:'Text',move:'Move'};
-            currentTool = map[btn.id] || 'pencil';
-            document.getElementById('tool-status').innerText = `Mode: ${lbl[currentTool]}`;
+            const clickedTool = map[btn.id] || 'pencil';
+
+            if (clickedTool === 'rect' && currentTool === 'rect') {
+                // すでにrect選択中に再タップでサブモード切替 (auto -> line -> rect -> auto)
+                if (rectSubMode === 'auto') rectSubMode = 'line';
+                else if (rectSubMode === 'line') rectSubMode = 'rect';
+                else rectSubMode = 'auto';
+            } else {
+                toolBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTool = clickedTool;
+                if (currentTool === 'rect') rectSubMode = 'auto';
+            }
+
+            updateToolStatusUI();
+
             if (currentTool === 'move') {
                 if (selectedShape) shapesCacheValid = false;
                 selectedShape = null; composite();
