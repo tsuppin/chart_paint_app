@@ -655,7 +655,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 両方向とも画面上で20px以上ドラッグされた場合は、
         // マグネット吸着を無視して四角形として扱う（横長/縦長の四角が直線に変換されるのを防ぐ）
-        const RECT_LOCK_THRESHOLD = 20;
+        const RECT_LOCK_THRESHOLD = 10;
         if (rawDx >= RECT_LOCK_THRESHOLD && rawDy >= RECT_LOCK_THRESHOLD) {
             return makeRectShape(startX, startY, px, py, isShift);
         }
