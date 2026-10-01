@@ -633,30 +633,37 @@ document.addEventListener('DOMContentLoaded', () => {
     // 四角形または直線（水平線/垂直線）を自動判別してシェイプを生成
     // ※斜めドラッグ時は前と同じように左上から右下への四角形を描画
     function getRectOrLineShape(px, py, isAlt, isShift) {
-        // 水平・垂直の弱めマグネット吸着を適用
-        const mag = applyMagnet(startX, startY, px, py, false);
-        const curX = mag.x;
-        const curY = mag.y;
+        // マグネット吸着前の生のドラッグ量を先に計算
+        const rawDx = Math.abs(px - startX) * viewScale;
+        const rawDy = Math.abs(py - startY) * viewScale;
+        const rawDist = Math.hypot(px - startX, py - startY) * viewScale;
 
-        const dx = curX - startX;
-        const dy = curY - startY;
-        const screenDx = Math.abs(dx) * viewScale;
-        const screenDy = Math.abs(dy) * viewScale;
-        const screenDist = Math.hypot(dx, dy) * viewScale;
+        if (rawDist < 4) return null;
 
-        if (screenDist < 4) return null;
-
-        // Altキーまたは直線固定モードなら直線
+        // Altキーまたは直線固定モードなら直線（マグネット吸着を使う）
         if (isAlt || rectSubMode === 'line') {
-            return { type: 'line', x1: startX, y1: startY, x2: curX, y2: curY, color: currentColor, size: currentSize };
+            const mag = applyMagnet(startX, startY, px, py, false);
+            return { type: 'line', x1: startX, y1: startY, x2: mag.x, y2: mag.y, color: currentColor, size: currentSize };
         }
 
-        // 四角固定モードなら四角形
+        // 四角固定モードなら四角形（吸着なし）
         if (rectSubMode === 'rect') {
-            return makeRectShape(startX, startY, curX, curY, isShift);
+            return makeRectShape(startX, startY, px, py, isShift);
         }
 
         // --- スマート自動判別 (rectSubMode === 'auto') ---
+
+        // 両方向とも画面上で20px以上ドラッグされた場合は、
+        // マグネット吸着を無視して四角形として扱う（横長/縦長の四角が直線に変換されるのを防ぐ）
+        const RECT_LOCK_THRESHOLD = 20;
+        if (rawDx >= RECT_LOCK_THRESHOLD && rawDy >= RECT_LOCK_THRESHOLD) {
+            return makeRectShape(startX, startY, px, py, isShift);
+        }
+
+        // マグネット吸着を適用（片方の軸が小さい場合のみここに到達）
+        const mag = applyMagnet(startX, startY, px, py, false);
+        const curX = mag.x;
+        const curY = mag.y;
 
         // 1. 水平マグネット吸着時（横に引いた場合） → 水平線（直線）
         if (mag.snapped === 'horizontal') {
@@ -668,8 +675,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return { type: 'line', x1: startX, y1: startY, x2: startX, y2: curY, color: currentColor, size: currentSize };
         }
 
-        // 3. 斜めにドラッグした場合（左上から右下など） → 前と同じように四角形（ボックス）を描画
-        return makeRectShape(startX, startY, curX, curY, isShift);
+        // 3. 斜めにドラッグした場合 → 四角形（ボックス）を描画
+        return makeRectShape(startX, startY, px, py, isShift);
     }
 
     function draw(e) {
