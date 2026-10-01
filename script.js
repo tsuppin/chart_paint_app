@@ -582,15 +582,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const deg = rad * (180 / Math.PI);
         const absDeg = Math.abs(deg);
 
-        // 水平マグネット: 水平からの角度差が 7.5度以内、または画面上のYブレが 13px 以内（弱めの吸着）
+        // 水平マグネット: 水平からの角度差が 4.5度以内、または画面上のYブレが 8px 以内（控えめな吸着）
         const diffHoriz = Math.min(absDeg, Math.abs(180 - absDeg));
-        if (diffHoriz <= 7.5 || (screenDy <= 13 && screenDx > 15)) {
+        if (diffHoriz <= 4.5 || (screenDy <= 8 && screenDx > 20)) {
             return { x: x2, y: y1, snapped: 'horizontal', angle: absDeg < 90 ? 0 : 180 };
         }
 
-        // 垂直マグネット: 垂直からの角度差が 7.5度以内、または画面上のXブレが 13px 以内（弱めの吸着）
+        // 垂直マグネット: 垂直からの角度差が 4.5度以内、または画面上のXブレが 8px 以内（控えめな吸着）
         const diffVert = Math.abs(90 - absDeg);
-        if (diffVert <= 7.5 || (screenDx <= 13 && screenDy > 15)) {
+        if (diffVert <= 4.5 || (screenDx <= 8 && screenDy > 20)) {
             return { x: x1, y: y2, snapped: 'vertical', angle: deg >= 0 ? 90 : -90 };
         }
 
