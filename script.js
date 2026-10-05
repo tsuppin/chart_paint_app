@@ -19,7 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const opacityRangeVal = document.getElementById('opacity-range-val');
     const btnCloseOpacity = document.getElementById('btn-close-opacity');
     const presetBtns   = document.querySelectorAll('.preset-btn');
-    const chkBgTransparent = document.getElementById('chk-bg-transparent');
     const btnSave     = document.getElementById('btn-save');
     const btnClear    = document.getElementById('btn-clear');
     const btnUndo     = document.getElementById('btn-undo');
@@ -57,8 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const MAX_UNDO = 30;
     let backgroundImage = null, currentZoom = 1.0;
     let bgOpacity = 1.0;
-    let bgTransparent = false;
-    const OPACITY_STEPS = [1.0, 0.75, 0.5, 0.25, 0.0];
+    const OPACITY_STEPS = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0];
     let statusTimeout = null;
     let longPressTimer = null;
     let isLongPressTriggered = false;
@@ -166,20 +164,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         presetBtns.forEach(btn => {
             const v = parseFloat(btn.dataset.val);
-            btn.classList.toggle('active', Math.abs(v - bgOpacity) < 0.02);
+            btn.classList.toggle('active', Math.abs(v - bgOpacity) < 0.04);
         });
 
         if (btnOpacity) {
             btnOpacity.disabled = !backgroundImage;
             btnOpacity.title = backgroundImage 
-                ? `画像の透過度: ${pct}% (タップ: 切替 / 長押し: 詳細)`
+                ? `画像の透過度: ${pct}% (タップ: 10%切替 / 長押し: スライダー)`
                 : '画像がありません';
         }
     }
 
     function setBackgroundOpacity(opacity) {
         if (!backgroundImage) return;
-        bgOpacity = Math.max(0, Math.min(1, opacity));
+        bgOpacity = Math.max(0, Math.min(1, Math.round(opacity * 100) / 100));
         updateOpacityUI();
         composite();
 
@@ -187,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pct = Math.round(bgOpacity * 100);
         const el = document.getElementById('tool-status');
         if (el) {
-            el.innerText = `透過度: ${pct}%${bgTransparent ? ' (背景透明)' : ''}`;
+            el.innerText = `透過度: ${pct}%`;
             clearTimeout(statusTimeout);
             statusTimeout = setTimeout(updateToolStatusUI, 1600);
         }
@@ -195,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cycleBackgroundOpacity() {
         if (!backgroundImage) return;
-        let curIdx = OPACITY_STEPS.findIndex(v => Math.abs(v - bgOpacity) < 0.05);
+        let curIdx = OPACITY_STEPS.findIndex(v => Math.abs(v - bgOpacity) < 0.04);
         if (curIdx === -1) {
             let closestIdx = 0, minDiff = 999;
             OPACITY_STEPS.forEach((v, idx) => {
@@ -233,10 +231,6 @@ document.addEventListener('DOMContentLoaded', () => {
         baseCtx.fillRect(0, 0, w, h);
         backgroundImage = null;
         bgOpacity = 1.0;
-        bgTransparent = false;
-        if (chkBgTransparent) chkBgTransparent.checked = false;
-        const container = document.getElementById('canvas-container');
-        if (container) container.classList.remove('transparent-bg');
         updateOpacityUI();
         shapes = []; selectedShape = null; currentPath = [];
         fitToScreen();
@@ -254,12 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function composite(preview) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 背景描画: 画像がある場合は透過度を反映して描画
+        // 背景描画: 画像がある場合は白塗りをせず透過度付きで描画（白くならず自然に透ける）
         if (backgroundImage) {
-            if (!bgTransparent) {
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }
             if (bgOpacity > 0) {
                 if (bgOpacity < 1.0) {
                     ctx.save();
@@ -883,10 +873,6 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onload = () => {
                 backgroundImage = img;
                 bgOpacity = 1.0;
-                bgTransparent = false;
-                if (chkBgTransparent) chkBgTransparent.checked = false;
-                const container = document.getElementById('canvas-container');
-                if (container) container.classList.remove('transparent-bg');
                 updateOpacityUI();
 
                 const MAX = 3000;
@@ -1085,22 +1071,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
-    if (chkBgTransparent) {
-        chkBgTransparent.addEventListener('change', e => {
-            bgTransparent = e.target.checked;
-            const container = document.getElementById('canvas-container');
-            if (container) {
-                container.classList.toggle('transparent-bg', bgTransparent);
-            }
-            composite();
-            const el = document.getElementById('tool-status');
-            if (el) {
-                el.innerText = bgTransparent ? '背景: 透過 (透明PNG保存)' : '背景: 白';
-                clearTimeout(statusTimeout);
-                statusTimeout = setTimeout(updateToolStatusUI, 1600);
-            }
-        });
-    }
 
     // 外側タップでポップアップを閉じる（Androidスマホ対応）
     document.addEventListener('pointerdown', e => {

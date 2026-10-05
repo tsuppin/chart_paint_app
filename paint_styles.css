@@ -225,23 +225,6 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     border-color: #bb86fc;
     color: #fff;
 }
-.opacity-bg-toggle-row {
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 0.4rem;
-}
-.bg-toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.7rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    user-select: none;
-}
-.bg-toggle-label input[type="checkbox"] {
-    accent-color: #bb86fc;
-    cursor: pointer;
-}
 
 .image-filename {
     font-size: 0.6rem;
@@ -306,7 +289,7 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
 }
 
 .canvas-container { 
-    background: #fff; 
+    background: transparent; 
     box-shadow: 0 10px 40px rgba(0,0,0,0.5); 
     border-radius: 4px; 
     position: absolute; 
@@ -316,16 +299,6 @@ h3 { font-size: 0.6rem; color: var(--text-secondary); text-transform: uppercase;
     transform-origin: 0 0;
     will-change: transform; /* GPU accelerated */
     transform: translateZ(0); /* Force layer */
-}
-.canvas-container.transparent-bg {
-    background-color: #24242d !important;
-    background-image: 
-        linear-gradient(45deg, #1c1c24 25%, transparent 25%),
-        linear-gradient(-45deg, #1c1c24 25%, transparent 25%),
-        linear-gradient(45deg, transparent 75%, #1c1c24 75%),
-        linear-gradient(-45deg, transparent 75%, #1c1c24 75%) !important;
-    background-size: 20px 20px !important;
-    background-position: 0 0, 0 10px, 10px -10px, -10px 0px !important;
 }
 #main-canvas { display: block; }
 
