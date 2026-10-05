@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>paint</title>
     <meta name="description" content="画像のアップロード、ペイント、保存ができるモダンで多機能なキャンバスアプリ。">
-    <link rel="stylesheet" href="paint_styles.css?v=8">
+    <link rel="stylesheet" href="paint_styles.css?v=9">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -63,6 +63,9 @@
                     <button id="btn-upload" class="action-btn upload-btn" title="画像をアップロード">
                         <i class="fas fa-image"></i> 画像
                     </button>
+                    <button id="btn-opacity" class="action-btn opacity-btn" title="画像の透過度を変更 (タップ: 切替 / 長押し: 詳細)" disabled>
+                        <i class="fas fa-circle-half-stroke"></i> <span class="btn-text-label">透過</span> <span id="opacity-val">100%</span>
+                    </button>
                     <button id="btn-save" class="action-btn save-btn" title="保存する">
                         <i class="fas fa-download"></i> 保存
                     </button>
@@ -73,6 +76,31 @@
                         <i class="fas fa-trash"></i>
                     </button>
                 </section>
+            </div>
+
+            <!-- 透過度微調整ポップアップ（長押しまたは詳細時） -->
+            <div id="opacity-popup" class="opacity-popup hidden">
+                <div class="opacity-popup-header">
+                    <span><i class="fas fa-circle-half-stroke"></i> 画像の透過度</span>
+                    <button id="btn-close-opacity" class="popup-close-btn" title="閉じる">&times;</button>
+                </div>
+                <div class="opacity-slider-row">
+                    <input type="range" id="opacity-range" min="0" max="100" value="100" step="1">
+                    <span id="opacity-range-val">100%</span>
+                </div>
+                <div class="opacity-presets">
+                    <button type="button" class="preset-btn" data-val="1.0">100%</button>
+                    <button type="button" class="preset-btn" data-val="0.75">75%</button>
+                    <button type="button" class="preset-btn" data-val="0.5">50%</button>
+                    <button type="button" class="preset-btn" data-val="0.25">25%</button>
+                    <button type="button" class="preset-btn" data-val="0">0%</button>
+                </div>
+                <div class="opacity-bg-toggle-row">
+                    <label class="bg-toggle-label">
+                        <input type="checkbox" id="chk-bg-transparent">
+                        <span>背景を透過 (透明PNG保存)</span>
+                    </label>
+                </div>
             </div>
         </aside>
 
@@ -92,6 +120,6 @@
         <div class="spinner"></div>
     </div>
 
-    <script src="script.js?v=20"></script>
+    <script src="script.js?v=21"></script>
 </body>
 </html>

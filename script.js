@@ -12,6 +12,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const dropZone    = document.getElementById('drop-zone');
     const imageInput  = document.getElementById('image-upload');
     const btnUpload   = document.getElementById('btn-upload');
+    const btnOpacity  = document.getElementById('btn-opacity');
+    const opacityVal  = document.getElementById('opacity-val');
+    const opacityPopup = document.getElementById('opacity-popup');
+    const opacityRange = document.getElementById('opacity-range');
+    const opacityRangeVal = document.getElementById('opacity-range-val');
+    const btnCloseOpacity = document.getElementById('btn-close-opacity');
+    const presetBtns   = document.querySelectorAll('.preset-btn');
+    const chkBgTransparent = document.getElementById('chk-bg-transparent');
     const btnSave     = document.getElementById('btn-save');
     const btnClear    = document.getElementById('btn-clear');
     const btnUndo     = document.getElementById('btn-undo');
@@ -48,6 +56,12 @@ document.addEventListener('DOMContentLoaded', () => {
     let undoStack = [];
     const MAX_UNDO = 30;
     let backgroundImage = null, currentZoom = 1.0;
+    let bgOpacity = 1.0;
+    let bgTransparent = false;
+    const OPACITY_STEPS = [1.0, 0.75, 0.5, 0.25, 0.0];
+    let statusTimeout = null;
+    let longPressTimer = null;
+    let isLongPressTriggered = false;
     let lastPinchDistance = null, lastPinchCenter = null;
 
     // === パフォーマンス最適化用 ===
@@ -143,6 +157,69 @@ document.addEventListener('DOMContentLoaded', () => {
         applyTransform();
     }
 
+    // === 透過制御 ===
+    function updateOpacityUI() {
+        const pct = Math.round(bgOpacity * 100);
+        if (opacityVal) opacityVal.innerText = `${pct}%`;
+        if (opacityRange) opacityRange.value = pct;
+        if (opacityRangeVal) opacityRangeVal.innerText = `${pct}%`;
+
+        presetBtns.forEach(btn => {
+            const v = parseFloat(btn.dataset.val);
+            btn.classList.toggle('active', Math.abs(v - bgOpacity) < 0.02);
+        });
+
+        if (btnOpacity) {
+            btnOpacity.disabled = !backgroundImage;
+            btnOpacity.title = backgroundImage 
+                ? `画像の透過度: ${pct}% (タップ: 切替 / 長押し: 詳細)`
+                : '画像がありません';
+        }
+    }
+
+    function setBackgroundOpacity(opacity) {
+        if (!backgroundImage) return;
+        bgOpacity = Math.max(0, Math.min(1, opacity));
+        updateOpacityUI();
+        composite();
+
+        // ツールステータスに透過度を一時表示
+        const pct = Math.round(bgOpacity * 100);
+        const el = document.getElementById('tool-status');
+        if (el) {
+            el.innerText = `透過度: ${pct}%${bgTransparent ? ' (背景透明)' : ''}`;
+            clearTimeout(statusTimeout);
+            statusTimeout = setTimeout(updateToolStatusUI, 1600);
+        }
+    }
+
+    function cycleBackgroundOpacity() {
+        if (!backgroundImage) return;
+        let curIdx = OPACITY_STEPS.findIndex(v => Math.abs(v - bgOpacity) < 0.05);
+        if (curIdx === -1) {
+            let closestIdx = 0, minDiff = 999;
+            OPACITY_STEPS.forEach((v, idx) => {
+                const diff = Math.abs(v - bgOpacity);
+                if (diff < minDiff) { minDiff = diff; closestIdx = idx; }
+            });
+            curIdx = closestIdx;
+        }
+        const nextIdx = (curIdx + 1) % OPACITY_STEPS.length;
+        setBackgroundOpacity(OPACITY_STEPS[nextIdx]);
+    }
+
+    function toggleOpacityPopup(show) {
+        if (!opacityPopup) return;
+        const willShow = show !== undefined ? show : opacityPopup.classList.contains('hidden');
+        if (willShow) {
+            if (!backgroundImage) return;
+            opacityPopup.classList.remove('hidden');
+            updateOpacityUI();
+        } else {
+            opacityPopup.classList.add('hidden');
+        }
+    }
+
     // === Canvas Init ===
     function initCanvas() {
         const mob = window.innerWidth <= 768;
@@ -154,6 +231,13 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.style.cursor = 'crosshair';
         baseCtx.fillStyle = '#ffffff';
         baseCtx.fillRect(0, 0, w, h);
+        backgroundImage = null;
+        bgOpacity = 1.0;
+        bgTransparent = false;
+        if (chkBgTransparent) chkBgTransparent.checked = false;
+        const container = document.getElementById('canvas-container');
+        if (container) container.classList.remove('transparent-bg');
+        updateOpacityUI();
         shapes = []; selectedShape = null; currentPath = [];
         fitToScreen();
         shapesCacheValid = false;
@@ -164,12 +248,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     initCanvas();
 
-    // === Composite: baseCanvas + キャッシュ済みシェイプ + プレビュー → メインキャンバス ===
+    // === Composite: 背景 + キャッシュ済みシェイプ + プレビュー → メインキャンバス ===
     // 確定済みシェイプはオフスクリーンの shapesCache に描画済みのものを使い回す。
     // これにより、毎フレーム全シェイプを再描画する必要がなくなる。
     function composite(preview) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(baseCanvas, 0, 0);
+
+        // 背景描画: 画像がある場合は透過度を反映して描画
+        if (backgroundImage) {
+            if (!bgTransparent) {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            if (bgOpacity > 0) {
+                if (bgOpacity < 1.0) {
+                    ctx.save();
+                    ctx.globalAlpha = bgOpacity;
+                    ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+                    ctx.restore();
+                } else {
+                    ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+                }
+            }
+        } else {
+            ctx.drawImage(baseCanvas, 0, 0);
+        }
 
         // キャッシュが無効なら再構築（selectedShape は除外）
         if (!shapesCacheValid) {
@@ -779,6 +882,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const img = new Image();
             img.onload = () => {
                 backgroundImage = img;
+                bgOpacity = 1.0;
+                bgTransparent = false;
+                if (chkBgTransparent) chkBgTransparent.checked = false;
+                const container = document.getElementById('canvas-container');
+                if (container) container.classList.remove('transparent-bg');
+                updateOpacityUI();
+
                 const MAX = 3000;
                 let w = img.width, h = img.height;
                 if (w>MAX){h*=MAX/w;w=MAX;} if (h>MAX){w*=MAX/h;h=MAX;}
@@ -809,15 +919,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function clearCanvas() {
         if (!confirm('キャンバスをクリアしますか？')) return;
-        if (backgroundImage) {
-            baseCtx.drawImage(backgroundImage, 0, 0, baseCanvas.width, baseCanvas.height);
-        } else {
-            baseCtx.fillStyle = '#ffffff';
-            baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
-        }
         shapes = []; selectedShape = null; currentPath = [];
         shapesCacheValid = false;
-        updateBaseSnapshot();
         composite(); saveUndoState();
     }
 
@@ -916,6 +1019,98 @@ document.addEventListener('DOMContentLoaded', () => {
         // 同じファイルを再選択できるようにリセット
         e.target.value = '';
     });
+
+    // === 透過ボタン & ポップアップのイベント ===
+    if (btnOpacity) {
+        // ポインターイベントで長押し検知（Android・スマホ・PC対応）
+        btnOpacity.addEventListener('pointerdown', e => {
+            if (btnOpacity.disabled) return;
+            isLongPressTriggered = false;
+            longPressTimer = setTimeout(() => {
+                isLongPressTriggered = true;
+                toggleOpacityPopup(true);
+                if (navigator.vibrate) {
+                    try { navigator.vibrate(30); } catch (_) {}
+                }
+            }, 450);
+        });
+
+        const cancelLongPress = () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        };
+        btnOpacity.addEventListener('pointerup', cancelLongPress);
+        btnOpacity.addEventListener('pointerleave', cancelLongPress);
+        btnOpacity.addEventListener('pointercancel', cancelLongPress);
+
+        // クリック（長押しでなければサイクル切替: 100% -> 75% -> 50% -> 25% -> 0% -> 100%）
+        btnOpacity.addEventListener('click', e => {
+            if (btnOpacity.disabled) return;
+            if (isLongPressTriggered) {
+                isLongPressTriggered = false;
+                return;
+            }
+            cycleBackgroundOpacity();
+            if (navigator.vibrate) {
+                try { navigator.vibrate(15); } catch (_) {}
+            }
+        });
+
+        // 右クリックでポップアップ表示 (PC用)
+        btnOpacity.addEventListener('contextmenu', e => {
+            if (!btnOpacity.disabled) {
+                e.preventDefault();
+                toggleOpacityPopup(true);
+            }
+        });
+    }
+
+    if (opacityRange) {
+        opacityRange.addEventListener('input', e => {
+            const val = parseInt(e.target.value, 10) / 100;
+            setBackgroundOpacity(val);
+        });
+    }
+    if (btnCloseOpacity) {
+        btnCloseOpacity.addEventListener('click', () => toggleOpacityPopup(false));
+    }
+    presetBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const val = parseFloat(btn.dataset.val);
+            setBackgroundOpacity(val);
+            if (navigator.vibrate) {
+                try { navigator.vibrate(15); } catch (_) {}
+            }
+        });
+    });
+    if (chkBgTransparent) {
+        chkBgTransparent.addEventListener('change', e => {
+            bgTransparent = e.target.checked;
+            const container = document.getElementById('canvas-container');
+            if (container) {
+                container.classList.toggle('transparent-bg', bgTransparent);
+            }
+            composite();
+            const el = document.getElementById('tool-status');
+            if (el) {
+                el.innerText = bgTransparent ? '背景: 透過 (透明PNG保存)' : '背景: 白';
+                clearTimeout(statusTimeout);
+                statusTimeout = setTimeout(updateToolStatusUI, 1600);
+            }
+        });
+    }
+
+    // 外側タップでポップアップを閉じる（Androidスマホ対応）
+    document.addEventListener('pointerdown', e => {
+        if (opacityPopup && !opacityPopup.classList.contains('hidden')) {
+            if (!opacityPopup.contains(e.target) && !btnOpacity.contains(e.target)) {
+                toggleOpacityPopup(false);
+            }
+        }
+    });
+
     btnSave.addEventListener('click', saveImage);
     btnClear.addEventListener('click', clearCanvas);
     if (btnUndo) btnUndo.addEventListener('click', undo);
