@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>paint</title>
     <meta name="description" content="画像のアップロード、ペイント、保存ができるモダンで多機能なキャンバスアプリ。">
-    <link rel="stylesheet" href="paint_styles.css?v=10">
+    <link rel="stylesheet" href="paint_styles.css?v=11">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -69,6 +69,9 @@
                     <button id="btn-save" class="action-btn save-btn" title="保存する">
                         <i class="fas fa-download"></i> 保存
                     </button>
+                    <button id="btn-grid" class="action-btn grid-btn" title="グリッド表示の切替 (G)">
+                        <i class="fas fa-border-all"></i>
+                    </button>
                     <button id="btn-undo" class="action-btn undo-btn" title="元に戻す (Ctrl+Z)" disabled>
                         <i class="fas fa-undo"></i>
                     </button>
@@ -102,7 +105,7 @@
         <main class="canvas-area">
             <div class="tool-status" id="tool-status">Mode: Pencil</div>
             <div id="canvas-container" class="canvas-container">
-                <canvas id="main-canvas"></canvas>
+                <canvas id="main-canvas"></canvas><canvas id="grid-canvas" class="grid-canvas hidden"></canvas>
                 <div id="drop-zone" class="drop-zone-overlay">
                     <p><i class="fas fa-cloud-upload-alt"></i> 画像をドラッグ＆ドロップまたはクリックでアップロード</p>
                 </div>
@@ -115,6 +118,6 @@
         <div class="spinner"></div>
     </div>
 
-    <script src="script.js?v=22"></script>
+    <script src="script.js?v=25"></script>
 </body>
 </html>

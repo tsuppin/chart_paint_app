@@ -57,6 +57,54 @@ document.addEventListener('DOMContentLoaded', () => {
     let backgroundImage = null, currentZoom = 1.0;
     let bgOpacity = 1.0;
     const OPACITY_STEPS = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0];
+
+    // === グリッド（表示専用オーバーレイ。保存画像には含まれない） ===
+    const gridCanvas = document.getElementById('grid-canvas');
+    const gridCtx = gridCanvas ? gridCanvas.getContext('2d') : null;
+    const btnGrid = document.getElementById('btn-grid');
+    const GRID_SIZE = 25;         // 細線の間隔 (キャンバス px)
+    const GRID_MAJOR_EVERY = 10;  // 太線を何マスごとに引くか（25px × 10 = 250px）
+    let showGrid = localStorage.getItem('paint-show-grid') === '1';
+    let gridDrawnW = 0, gridDrawnH = 0;
+
+    // キャンバスサイズが変わった時だけグリッドを再描画
+    function ensureGrid() {
+        if (!showGrid || !gridCtx) return;
+        const w = canvas.width, h = canvas.height;
+        if (gridDrawnW === w && gridDrawnH === h) return;
+        gridCanvas.width = w; gridCanvas.height = h;
+        gridCtx.clearRect(0, 0, w, h);
+        // 大きい画像でも線が見えるよう、線幅をキャンバスサイズに応じて調整
+        const lw = Math.max(1, Math.round(Math.max(w, h) / 1000));
+        const drawLines = (major) => {
+            gridCtx.beginPath();
+            for (let i = 1; i * GRID_SIZE < w; i++) {
+                if ((i % GRID_MAJOR_EVERY === 0) !== major) continue;
+                const x = i * GRID_SIZE + (lw % 2 ? 0.5 : 0);
+                gridCtx.moveTo(x, 0); gridCtx.lineTo(x, h);
+            }
+            for (let j = 1; j * GRID_SIZE < h; j++) {
+                if ((j % GRID_MAJOR_EVERY === 0) !== major) continue;
+                const y = j * GRID_SIZE + (lw % 2 ? 0.5 : 0);
+                gridCtx.moveTo(0, y); gridCtx.lineTo(w, y);
+            }
+            gridCtx.lineWidth = major ? lw * 1.5 : lw;
+            // 白背景でも暗い画像でも見えるよう、中間色＋半透明
+            gridCtx.strokeStyle = major ? 'rgba(255, 255, 255, 0.45)' : 'rgba(120, 140, 160, 0.35)';
+            gridCtx.stroke();
+        };
+        drawLines(false);
+        drawLines(true);
+        gridDrawnW = w; gridDrawnH = h;
+    }
+
+    function setGridVisible(v) {
+        showGrid = v;
+        localStorage.setItem('paint-show-grid', v ? '1' : '0');
+        if (gridCanvas) gridCanvas.classList.toggle('hidden', !v);
+        if (btnGrid) btnGrid.classList.toggle('active', v);
+        if (v) { gridDrawnW = gridDrawnH = 0; ensureGrid(); }
+    }
     let statusTimeout = null;
     let longPressTimer = null;
     let isLongPressTriggered = false;
@@ -283,6 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // プレビュー（描画中のシェイプ）
         if (preview) drawObj(ctx, preview, false);
+
+        // グリッド（サイズ変更時のみ再描画）
+        ensureGrid();
     }
 
     // === rAF スロットル付きプレビュー描画 ===
@@ -675,22 +726,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const deg = rad * (180 / Math.PI);
         const absDeg = Math.abs(deg);
 
-        // 水平マグネット: 水平からの角度差が 4.5度以内、または画面上のYブレが 8px 以内（控えめな吸着）
+        // 水平マグネット: 水平からの角度差が 8度以内、または画面上のYブレが 14px 以内
         const diffHoriz = Math.min(absDeg, Math.abs(180 - absDeg));
-        if (diffHoriz <= 4.5 || (screenDy <= 8 && screenDx > 20)) {
+        if (diffHoriz <= 8 || (screenDy <= 14 && screenDx > 20)) {
             return { x: x2, y: y1, snapped: 'horizontal', angle: absDeg < 90 ? 0 : 180 };
         }
 
-        // 垂直マグネット: 垂直からの角度差が 4.5度以内、または画面上のXブレが 8px 以内（控えめな吸着）
+        // 垂直マグネット: 垂直からの角度差が 8度以内、または画面上のXブレが 14px 以内
         const diffVert = Math.abs(90 - absDeg);
-        if (diffVert <= 4.5 || (screenDx <= 8 && screenDy > 20)) {
+        if (diffVert <= 8 || (screenDx <= 14 && screenDy > 20)) {
             return { x: x1, y: y2, snapped: 'vertical', angle: deg >= 0 ? 90 : -90 };
         }
 
         // 直線ツール等で斜め45度マグネットを有効にする場合
         if (allowDiagonal) {
             const diff45 = Math.min(Math.abs(45 - absDeg), Math.abs(135 - absDeg));
-            if (diff45 <= 4.5) {
+            if (diff45 <= 7) {
                 const signX = dx >= 0 ? 1 : -1;
                 const signY = dy >= 0 ? 1 : -1;
                 const avg = (Math.abs(dx) + Math.abs(dy)) / 2;
@@ -748,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 両方向とも画面上で20px以上ドラッグされた場合は、
         // マグネット吸着を無視して四角形として扱う（横長/縦長の四角が直線に変換されるのを防ぐ）
-        const RECT_LOCK_THRESHOLD = 10;
+        const RECT_LOCK_THRESHOLD = 16;
         if (rawDx >= RECT_LOCK_THRESHOLD && rawDy >= RECT_LOCK_THRESHOLD) {
             return makeRectShape(startX, startY, px, py, isShift);
         }
@@ -1084,8 +1135,17 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSave.addEventListener('click', saveImage);
     btnClear.addEventListener('click', clearCanvas);
     if (btnUndo) btnUndo.addEventListener('click', undo);
+    if (btnGrid) btnGrid.addEventListener('click', () => setGridVisible(!showGrid));
+    setGridVisible(showGrid);
 
     document.addEventListener('keydown', e => {
+        // G キーでグリッド切替（テキスト入力中は無視）
+        const tag = (e.target && e.target.tagName) || '';
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'g' || e.key === 'G')
+            && tag !== 'INPUT' && tag !== 'TEXTAREA' && !(e.target && e.target.isContentEditable)) {
+            e.preventDefault();
+            setGridVisible(!showGrid);
+        }
         if ((e.ctrlKey||e.metaKey) && e.key==='z') { e.preventDefault(); undo(); }
         if ((e.key==='Delete'||e.key==='Backspace') && selectedShape && currentTool==='move') {
             shapes = shapes.filter(s => s !== selectedShape);
