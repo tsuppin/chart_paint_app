@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             gridCtx.lineWidth = major ? lw * 1.5 : lw;
             // 白背景でも暗い画像でも見えるよう、中間色＋半透明
-            gridCtx.strokeStyle = major ? 'rgba(255, 255, 255, 0.45)' : 'rgba(120, 140, 160, 0.35)';
+            gridCtx.strokeStyle = major ? 'rgba(255, 255, 255, 0.25)' : 'rgba(120, 140, 160, 0.35)';
             gridCtx.stroke();
         };
         drawLines(false);
