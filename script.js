@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
     let dragTrajectory = []; // rect描画時の軌跡点列（直線性判定用）
+    let fillMode = false; // 塗りつぶしトグル (四角・丸に適用)
     let rectSubMode = 'auto'; // 'auto' | 'line' | 'rect'
     let lastKeyModifiers = { alt: false, shift: false };
     let rafPending = false; // requestAnimationFrame 管理フラグ
@@ -62,8 +63,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const gridCanvas = document.getElementById('grid-canvas');
     const gridCtx = gridCanvas ? gridCanvas.getContext('2d') : null;
     const btnGrid = document.getElementById('btn-grid');
-    const GRID_SIZE = 25;         // 細線の間隔 (キャンバス px)
-    const GRID_MAJOR_EVERY = 10;  // 太線を何マスごとに引くか（25px × 10 = 250px）
+    const GRID_SIZE = 10;         // 細線の間隔 (キャンバス px)
+    const GRID_MAJOR_EVERY = 5;   // 太線を何マスごとに引くか（10px × 5 = 50px）
     let showGrid = localStorage.getItem('paint-show-grid') === '1';
     let gridDrawnW = 0, gridDrawnH = 0;
 
@@ -90,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             gridCtx.lineWidth = major ? lw * 1.5 : lw;
             // 白背景でも暗い画像でも見えるよう、中間色＋半透明
-            gridCtx.strokeStyle = major ? 'rgba(255, 255, 255, 0.25)' : 'rgba(120, 140, 160, 0.35)';
+            gridCtx.strokeStyle = major ? 'rgba(255, 255, 255, 0.10)' : 'rgba(120, 140, 160, 0.14)';
             gridCtx.stroke();
         };
         drawLines(false);
@@ -120,6 +121,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyTransform() {
         const container = document.getElementById('canvas-container');
         if (container) container.style.transform = `translate3d(${viewX}px, ${viewY}px, 0) scale(${viewScale})`;
+        const zv = document.getElementById('zoom-val');
+        if (zv) zv.textContent = `${Math.round(viewScale * 100)}%`;
     }
 
     function setZoom(z, screenX, screenY) {
@@ -467,6 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } else if (s.type === 'rect') {
             const { x, y, w, h, color, size } = s;
+            if (s.fill) { tc.fillStyle = color; tc.fillRect(x, y, w, h); }
             const edges = [
                 lineToPoints(x, y, x + w, y),
                 lineToPoints(x + w, y, x + w, y + h),
@@ -474,6 +478,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 lineToPoints(x, y + h, x, y)
             ];
             edges.forEach(pts => drawPencilStroke(tc, pts, color, size, sel));
+
+        } else if (s.type === 'circle') {
+            const cx = s.x + s.w / 2, cy = s.y + s.h / 2, rx = s.w / 2, ry = s.h / 2;
+            if (s.fill) {
+                tc.beginPath(); tc.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+                tc.fillStyle = s.color; tc.fill();
+            }
+            const n = Math.max(32, Math.round(Math.PI * (rx + ry) / 3));
+            const pts = [];
+            for (let i = 0; i <= n; i++) {
+                const a = (i / n) * Math.PI * 2;
+                pts.push({ x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a) });
+            }
+            drawPencilStroke(tc, pts, s.color, s.size, sel);
 
         } else if (s.type === 'text') {
             const fontSize = s.size * 4;
@@ -566,7 +584,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     [x, y + h, x, y]
                 ];
                 if (edges.some(([x1, y1, x2, y2]) => distToSeg(px, py, x1, y1, x2, y2) <= thr)) return s;
-            } else if (s.type === 'text') {
+                if (s.fill && px >= x && px <= x + w && py >= y && py <= y + h) return s;
+            } else if (s.type === 'circle') {
+                const cx = s.x + s.w / 2, cy = s.y + s.h / 2, rx = Math.max(s.w / 2, 1), ry = Math.max(s.h / 2, 1);
+                const d = Math.hypot((px - cx) / rx, (py - cy) / ry); // 1 = 輪郭上
+                const edgeTol = thr / Math.min(rx, ry);
+                if (s.fill ? d <= 1 + edgeTol : Math.abs(d - 1) <= edgeTol) return s;            } else if (s.type === 'text') {
                 const fontSize = s.size * 4;
                 const lineH = fontSize * 1.2;
                 const lines = s.text.split('\n');
@@ -580,7 +603,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function moveShape(s, dx, dy) {
         if (s.type === 'line')   { s.x1+=dx; s.y1+=dy; s.x2+=dx; s.y2+=dy; }
-        if (s.type === 'rect')   { s.x+=dx; s.y+=dy; }
+        if (s.type === 'rect' || s.type === 'circle') { s.x+=dx; s.y+=dy; }
         if (s.type === 'pencil') { s.points = s.points.map(p => ({x:p.x+dx, y:p.y+dy})); }
         if (s.type === 'text')   { s.x+=dx; s.y+=dy; }
     }
@@ -728,20 +751,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 水平マグネット: 水平からの角度差が 8度以内、または画面上のYブレが 14px 以内
         const diffHoriz = Math.min(absDeg, Math.abs(180 - absDeg));
-        if (diffHoriz <= 8 || (screenDy <= 14 && screenDx > 20)) {
+        if (diffHoriz <= 14 || (screenDy <= 24 && screenDx > 20)) {
             return { x: x2, y: y1, snapped: 'horizontal', angle: absDeg < 90 ? 0 : 180 };
         }
 
         // 垂直マグネット: 垂直からの角度差が 8度以内、または画面上のXブレが 14px 以内
         const diffVert = Math.abs(90 - absDeg);
-        if (diffVert <= 8 || (screenDx <= 14 && screenDy > 20)) {
+        if (diffVert <= 14 || (screenDx <= 24 && screenDy > 20)) {
             return { x: x1, y: y2, snapped: 'vertical', angle: deg >= 0 ? 90 : -90 };
         }
 
         // 直線ツール等で斜め45度マグネットを有効にする場合
         if (allowDiagonal) {
             const diff45 = Math.min(Math.abs(45 - absDeg), Math.abs(135 - absDeg));
-            if (diff45 <= 7) {
+            if (diff45 <= 11) {
                 const signX = dx >= 0 ? 1 : -1;
                 const signY = dy >= 0 ? 1 : -1;
                 const avg = (Math.abs(dx) + Math.abs(dy)) / 2;
@@ -766,12 +789,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const rh = Math.abs(h);
         if (rw > 0 || rh > 0) {
             if (rw > 0 && rh > 0) {
-                return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize };
+                return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize, fill: fillMode };
             } else {
                 return { type: 'line', x1: x1, y1: y1, x2: x2, y2: y2, color: currentColor, size: currentSize };
             }
         }
         return null;
+    }
+
+    // 丸(楕円): ドラッグ範囲を外接矩形とする。Shift で正円
+    function makeCircleShape(x1, y1, x2, y2, isShift) {
+        let w = x2 - x1, h = y2 - y1;
+        if (isShift) {
+            const side = Math.max(Math.abs(w), Math.abs(h));
+            w = (w < 0 ? -1 : 1) * side; h = (h < 0 ? -1 : 1) * side;
+        }
+        const aw = Math.abs(w), ah = Math.abs(h);
+        if (aw < 2 || ah < 2) return null;
+        return { type: 'circle', x: w < 0 ? x1 + w : x1, y: h < 0 ? y1 + h : y1, w: aw, h: ah,
+                 color: currentColor, size: currentSize, fill: fillMode };
     }
 
     // 四角形または直線（水平線/垂直線）を自動判別してシェイプを生成
@@ -869,6 +905,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (currentTool === 'rect') {
             const shape = getRectOrLineShape(pos.x, pos.y, e.altKey, e.shiftKey);
             if (shape) schedulePreview(shape);
+        } else if (currentTool === 'circle') {
+            const shape = makeCircleShape(startX, startY, pos.x, pos.y, e.shiftKey);
+            if (shape) schedulePreview(shape);
         }
     }
 
@@ -910,14 +949,57 @@ document.addEventListener('DOMContentLoaded', () => {
                 shapesCacheValid = false;
                 composite(); saveUndoState();
             }
+        } else if (currentTool === 'circle') {
+            const shape = makeCircleShape(startX, startY, lastPos.x, lastPos.y, lastKeyModifiers.shift);
+            if (shape) {
+                shapes.push(shape);
+                shapesCacheValid = false;
+                composite(); saveUndoState();
+            }
         }
     }
 
     // === Image / Save / Clear ===
-    function handleImage(file) {
-        if (!file || !file.type.startsWith('image/')) return;
+    // 複数画像: pages[i] = { file, state }  state は離脱時に保存(描画内容など)
+    let pages = [], pageIdx = -1;
+    function stashCurrentPage() {
+        const pg = pages[pageIdx]; if (!pg || !backgroundImage) return;
+        pg.state = {
+            img: backgroundImage, w: canvas.width, h: canvas.height, bgOpacity,
+            base: cloneID(baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height)),
+            shapes, undoStack
+        };
+    }
+    function updatePagerUI() {
+        const pager = document.getElementById('image-pager');
+        if (!pager) return;
+        pager.classList.toggle('hidden', pages.length < 2);
+        const lbl = document.getElementById('pager-label');
+        if (lbl) lbl.textContent = `${pageIdx + 1}/${pages.length}`;
         const el = document.getElementById('upload-filename');
-        if (el) { el.textContent = file.name; el.title = file.name; }
+        const f = pages[pageIdx] && pages[pageIdx].file;
+        if (el && f) { el.textContent = f.name; el.title = f.name; }
+    }
+    function showPage(i) {
+        if (i < 0 || i >= pages.length) return;
+        if (i !== pageIdx) stashCurrentPage();
+        pageIdx = i;
+        const pg = pages[i];
+        updatePagerUI();
+        if (pg.state) {
+            const st = pg.state;
+            backgroundImage = st.img; bgOpacity = st.bgOpacity; updateOpacityUI();
+            canvas.width = baseCanvas.width = shapesCache.width = st.w;
+            canvas.height = baseCanvas.height = shapesCache.height = st.h;
+            baseCtx.putImageData(cloneID(st.base), 0, 0);
+            shapes = st.shapes; undoStack = st.undoStack; selectedShape = null; currentPath = [];
+            fitToScreen();
+            shapesCacheValid = false;
+            updateBaseSnapshot();
+            composite();
+            dropZone.classList.add('hidden');
+            return;
+        }
         const reader = new FileReader();
         reader.onload = ev => {
             const img = new Image();
@@ -944,9 +1026,20 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             img.src = ev.target.result;
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(pg.file);
     }
-
+    // files: FileList/配列。画像のみ抽出し、名前順で読み込む(複数・フォルダ対応)
+    function handleImages(files) {
+        const list = Array.from(files || []).filter(f => f.type.startsWith('image/') ||
+            /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(f.name));
+        if (!list.length) return;
+        list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+        stashCurrentPage();
+        pages = list.map(file => ({ file, state: null }));
+        pageIdx = -1;
+        showPage(0);
+    }
+    function handleImage(file) { if (file) handleImages([file]); }
     function saveImage() {
         composite();
         const a = document.createElement('a');
@@ -962,7 +1055,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateToolStatusUI() {
-        const lbl = { pencil: 'Pencil', line: 'Line (Magnet)', rect: 'Rect / Line', text: 'Text', move: 'Move' };
+        const lbl = { pencil: 'Pencil', line: 'Line (Magnet)', rect: 'Rect / Line', circle: 'Circle', text: 'Text', move: 'Move' };
         let statusText = `Mode: ${lbl[currentTool] || currentTool}`;
         const rectBtn = document.getElementById('btn-rect');
         const lineBtn = document.getElementById('btn-line');
@@ -989,7 +1082,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Event Listeners ===
     toolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-text':'text','btn-move':'move'};
+            if (btn.dataset.toggle) return; // 塗りつぶしはトグルとして別処理
+            const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-circle':'circle','btn-text':'text','btn-move':'move'};
             const clickedTool = map[btn.id] || 'pencil';
 
             if (clickedTool === 'rect' && currentTool === 'rect') {
@@ -1036,6 +1130,15 @@ document.addEventListener('DOMContentLoaded', () => {
         brushSizeVal.innerText = `${currentSize}px`;
     });
 
+    // 画像の拡大縮小ボタン (表示エリア中央を基準)
+    function stepZoom(factor) {
+        const area = document.querySelector('.canvas-area');
+        const r = area ? area.getBoundingClientRect() : null;
+        if (r) setZoom(viewScale * factor, r.left + r.width / 2, r.top + r.height / 2);
+        else setZoom(viewScale * factor);
+    }
+    document.getElementById('btn-zoom-dec').addEventListener('click', () => stepZoom(1 / 1.1));
+    document.getElementById('btn-zoom-inc').addEventListener('click', () => stepZoom(1.1));
     document.getElementById('btn-brush-dec').addEventListener('click', () => {
         brushSizeInput.value = Math.max(1, parseInt(brushSizeInput.value) - 1);
         brushSizeInput.dispatchEvent(new Event('input'));
@@ -1045,18 +1148,31 @@ document.addEventListener('DOMContentLoaded', () => {
         brushSizeInput.dispatchEvent(new Event('input'));
     });
 
+    // 塗りつぶしトグル: ON の間、四角・丸を塗りつぶして描く
+    const btnFill = document.getElementById('btn-fill');
+    if (btnFill) btnFill.addEventListener('click', () => {
+        fillMode = !fillMode;
+        btnFill.classList.toggle('fill-on', fillMode);
+        const el = document.getElementById('tool-status');
+        if (el) { el.textContent = fillMode ? 'Fill: ON' : 'Fill: OFF'; }
+        clearTimeout(statusTimeout);
+        statusTimeout = setTimeout(updateToolStatusUI, 1600);
+    });
     btnUpload.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', e => {
-        const file = e.target.files[0];
-        if (!file) {
-            const el = document.getElementById('upload-filename');
-            if (el) { el.textContent = ''; el.title = ''; }
-        }
-        handleImage(file);
+        handleImages(e.target.files);
         // 同じファイルを再選択できるようにリセット
         e.target.value = '';
     });
-
+    const folderInput = document.getElementById('folder-upload');
+    const btnFolder = document.getElementById('btn-folder');
+    if (btnFolder && folderInput) {
+        btnFolder.addEventListener('click', () => folderInput.click());
+        folderInput.addEventListener('change', e => { handleImages(e.target.files); e.target.value = ''; });
+    }
+    const btnPrev = document.getElementById('btn-page-prev'), btnNext = document.getElementById('btn-page-next');
+    if (btnPrev) btnPrev.addEventListener('click', () => showPage(pageIdx - 1));
+    if (btnNext) btnNext.addEventListener('click', () => showPage(pageIdx + 1));
     // === 透過ボタン & ポップアップのイベント ===
     if (btnOpacity) {
         // ポインターイベントで長押し検知（Android・スマホ・PC対応）
@@ -1165,7 +1281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('drop', e => { 
         e.preventDefault(); 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            handleImage(e.dataTransfer.files[0]); 
+            handleImages(e.dataTransfer.files); 
         }
     });
     dropZone.addEventListener('click', (e) => { 

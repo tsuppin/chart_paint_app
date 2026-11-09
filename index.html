@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>paint</title>
     <meta name="description" content="画像のアップロード、ペイント、保存ができるモダンで多機能なキャンバスアプリ。">
-    <link rel="stylesheet" href="paint_styles.css?v=11">
+    <link rel="stylesheet" href="paint_styles.css?v=13">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -24,6 +24,12 @@
                         </button>
                         <button id="btn-rect" class="tool-btn" title="四角 / 線 (斜め対応・弱めマグネット)">
                             <i class="far fa-square"></i>
+                        </button>
+                        <button id="btn-circle" class="tool-btn" title="円">
+                            <i class="far fa-circle"></i>
+                        </button>
+                        <button id="btn-fill" class="tool-btn" data-toggle="true" title="塗りつぶし">
+                            <i class="fas fa-fill-drip"></i>
                         </button>
                         <button id="btn-text" class="tool-btn" title="テキスト">
                             <i class="fas fa-font"></i>
@@ -48,21 +54,18 @@
                 </section>
             </div>
 
-            <!-- 2段目: ブラシサイズ + アクションボタン -->
-            <div class="toolbar-row">
-                <section class="brush-section">
-                    <button id="btn-brush-dec" class="size-adj-btn" title="ブラシを小さく"><i class="fas fa-minus"></i></button>
-                    <input type="range" id="brush-size" min="1" max="50" value="3" title="ブラシの太さ" style="display:none;">
-                    <button id="btn-brush-inc" class="size-adj-btn" title="ブラシを大きく"><i class="fas fa-plus"></i></button>
-                    <span id="brush-size-val" style="display:none;">3px</span>
-                </section>
+            <!-- 2段目: アクションボタン -->
+            <div class="toolbar-row action-row">
 
                 <section class="action-section">
-                    <input type="file" id="image-upload" accept="image/*" hidden>
+                    <input type="file" id="image-upload" accept="image/*" multiple hidden>
+                    <input type="file" id="folder-upload" accept="image/*" webkitdirectory multiple hidden>
                     <span id="upload-filename" class="upload-filename" title=""></span>
+                    <button id="btn-folder" class="action-btn upload-btn" title="フォルダを選択"><i class="fas fa-folder-open"></i></button>
                     <button id="btn-upload" class="action-btn upload-btn" title="画像をアップロード">
                         <i class="fas fa-image"></i> 画像
                     </button>
+                    <div id="image-pager" class="image-pager hidden"><button id="btn-page-prev" class="action-btn" title="前の画像"><i class="fas fa-chevron-left"></i></button><span id="pager-label">1/1</span><button id="btn-page-next" class="action-btn" title="次の画像"><i class="fas fa-chevron-right"></i></button></div>
                     <button id="btn-opacity" class="action-btn opacity-btn" title="画像の透過度を変更 (タップ: 切替 / 長押し: 詳細)" disabled>
                         <i class="fas fa-circle-half-stroke"></i> <span class="btn-text-label">透過</span> <span id="opacity-val">100%</span>
                     </button>
@@ -78,6 +81,22 @@
                     <button id="btn-clear" class="action-btn clear-btn" title="クリア">
                         <i class="fas fa-trash"></i>
                     </button>
+                </section>
+            </div>
+
+            <!-- 3段目: 画像サイズ(拡大縮小) + ブラシサイズ -->
+            <div class="toolbar-row">
+                <section class="brush-section zoom-section">
+                    <button id="btn-zoom-dec" class="size-adj-btn" title="画像を小さく"><i class="fas fa-minus"></i></button>
+                    <span id="zoom-val" class="size-val" title="画像の表示倍率">100%</span>
+                    <button id="btn-zoom-inc" class="size-adj-btn" title="画像を大きく"><i class="fas fa-plus"></i></button>
+                </section>
+
+                <section class="brush-section">
+                    <button id="btn-brush-dec" class="size-adj-btn" title="ブラシを小さく"><i class="fas fa-minus"></i></button>
+                    <span id="brush-size-val" class="size-val" title="線の太さ">3px</span>
+                    <input type="range" id="brush-size" min="1" max="50" value="3" title="ブラシの太さ" style="display:none;">
+                    <button id="btn-brush-inc" class="size-adj-btn" title="ブラシを大きく"><i class="fas fa-plus"></i></button>
                 </section>
             </div>
 
@@ -118,6 +137,6 @@
         <div class="spinner"></div>
     </div>
 
-    <script src="script.js?v=25"></script>
+    <script src="script.js?v=29"></script>
 </body>
 </html>
