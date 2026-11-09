@@ -801,22 +801,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const deg = rad * (180 / Math.PI);
         const absDeg = Math.abs(deg);
 
-        // 水平マグネット: 水平からの角度差が 8度以内、または画面上のYブレが 14px 以内
+        // 水平マグネット: 水平からの角度差が 5度以内、または画面上のYブレが 9px 以内
         const diffHoriz = Math.min(absDeg, Math.abs(180 - absDeg));
-        if (diffHoriz <= 14 || (screenDy <= 24 && screenDx > 20)) {
+        if (diffHoriz <= 5 || (screenDy <= 9 && screenDx > 20)) {
             return { x: x2, y: y1, snapped: 'horizontal', angle: absDeg < 90 ? 0 : 180 };
         }
 
-        // 垂直マグネット: 垂直からの角度差が 8度以内、または画面上のXブレが 14px 以内
+        // 垂直マグネット: 垂直からの角度差が 5度以内、または画面上のXブレが 9px 以内
         const diffVert = Math.abs(90 - absDeg);
-        if (diffVert <= 14 || (screenDx <= 24 && screenDy > 20)) {
+        if (diffVert <= 5 || (screenDx <= 9 && screenDy > 20)) {
             return { x: x1, y: y2, snapped: 'vertical', angle: deg >= 0 ? 90 : -90 };
         }
 
         // 直線ツール等で斜め45度マグネットを有効にする場合
         if (allowDiagonal) {
             const diff45 = Math.min(Math.abs(45 - absDeg), Math.abs(135 - absDeg));
-            if (diff45 <= 11) {
+            if (diff45 <= 5) {
                 const signX = dx >= 0 ? 1 : -1;
                 const signY = dy >= 0 ? 1 : -1;
                 const avg = (Math.abs(dx) + Math.abs(dy)) / 2;
@@ -885,29 +885,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- スマート自動判別 (rectSubMode === 'auto') ---
 
-        // 両方向とも画面上で20px以上ドラッグされた場合は、
-        // マグネット吸着を無視して四角形として扱う（横長/縦長の四角が直線に変換されるのを防ぐ）
-        const RECT_LOCK_THRESHOLD = 16;
+        // 両方向とも画面上で 6px 以上ドラッグされた場合は、
+        // マグネット吸着を無視して四角形として扱う（細長い四角が直線に変換されるのを防ぐ）
+        const RECT_LOCK_THRESHOLD = 6;
         if (rawDx >= RECT_LOCK_THRESHOLD && rawDy >= RECT_LOCK_THRESHOLD) {
             return makeRectShape(startX, startY, px, py, isShift);
         }
 
-        // マグネット吸着を適用（片方の軸が小さい場合のみここに到達）
-        const mag = applyMagnet(startX, startY, px, py, false);
-        const curX = mag.x;
-        const curY = mag.y;
-
-        // 1. 水平マグネット吸着時（横に引いた場合） → 水平線（直線）
-        if (mag.snapped === 'horizontal') {
-            return { type: 'line', x1: startX, y1: startY, x2: curX, y2: startY, color: currentColor, size: currentSize };
+        // 片方の軸がごく小さい（6px未満）場合のみ、真横・真縦に引いたときに直線へ吸着する
+        // 1. 横に引いていて縦のブレがごく小さい場合 → 水平線（直線）
+        if (rawDy < RECT_LOCK_THRESHOLD && rawDx > 18) {
+            return { type: 'line', x1: startX, y1: startY, x2: px, y2: startY, color: currentColor, size: currentSize };
         }
 
-        // 2. 垂直マグネット吸着時（縦に引いた場合） → 垂直線（直線）
-        if (mag.snapped === 'vertical') {
-            return { type: 'line', x1: startX, y1: startY, x2: startX, y2: curY, color: currentColor, size: currentSize };
+        // 2. 縦に引いていて横のブレがごく小さい場合 → 垂直線（直線）
+        if (rawDx < RECT_LOCK_THRESHOLD && rawDy > 18) {
+            return { type: 'line', x1: startX, y1: startY, x2: startX, y2: py, color: currentColor, size: currentSize };
         }
 
-        // 3. 斜めにドラッグした場合 → 四角形（ボックス）を描画
+        // 3. それ以外（斜めにドラッグした場合など） → 四角形（ボックス）を描画
         return makeRectShape(startX, startY, px, py, isShift);
     }
 
