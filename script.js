@@ -32,7 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
     let dragTrajectory = []; // rect描画時の軌跡点列（直線性判定用）
-    let fillMode = false; // 塗りつぶしトグル (四角・丸に適用)
     let rectSubMode = 'auto'; // 'auto' | 'line' | 'rect'
     let lastKeyModifiers = { alt: false, shift: false };
     let rafPending = false; // requestAnimationFrame 管理フラグ
@@ -470,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } else if (s.type === 'rect') {
             const { x, y, w, h, color, size } = s;
-            if (s.fill) { tc.fillStyle = color; tc.fillRect(x, y, w, h); }
+            if (s.fill) { tc.fillStyle = s.fillColor || color; tc.fillRect(x, y, w, h); }
             const edges = [
                 lineToPoints(x, y, x + w, y),
                 lineToPoints(x + w, y, x + w, y + h),
@@ -483,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cx = s.x + s.w / 2, cy = s.y + s.h / 2, rx = s.w / 2, ry = s.h / 2;
             if (s.fill) {
                 tc.beginPath(); tc.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-                tc.fillStyle = s.color; tc.fill();
+                tc.fillStyle = s.fillColor || s.color; tc.fill();
             }
             const n = Math.max(32, Math.round(Math.PI * (rx + ry) / 3));
             const pts = [];
@@ -589,7 +588,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cx = s.x + s.w / 2, cy = s.y + s.h / 2, rx = Math.max(s.w / 2, 1), ry = Math.max(s.h / 2, 1);
                 const d = Math.hypot((px - cx) / rx, (py - cy) / ry); // 1 = 輪郭上
                 const edgeTol = thr / Math.min(rx, ry);
-                if (s.fill ? d <= 1 + edgeTol : Math.abs(d - 1) <= edgeTol) return s;            } else if (s.type === 'text') {
+                if (s.fill ? d <= 1 + edgeTol : Math.abs(d - 1) <= edgeTol) return s;
+            } else if (s.type === 'text') {
                 const fontSize = s.size * 4;
                 const lineH = fontSize * 1.2;
                 const lines = s.text.split('\n');
@@ -599,6 +599,57 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         return null;
+    }
+
+    // 塗りつぶしツール用: クリック位置 (px, py) の内側または輪郭上にある四角・丸を探す
+    function findShapeToFill(px, py) {
+        const candidates = [];
+        for (let i = shapes.length - 1; i >= 0; i--) {
+            const s = shapes[i];
+            if (s.type !== 'rect' && s.type !== 'circle') continue;
+            const thr = Math.max(s.size / 2 + 10, 14);
+
+            if (s.type === 'rect') {
+                const { x, y, w, h } = s;
+                const inside = px >= x && px <= x + w && py >= y && py <= y + h;
+                const onEdge = !inside && [
+                    [x, y, x + w, y],
+                    [x + w, y, x + w, y + h],
+                    [x + w, y + h, x, y + h],
+                    [x, y + h, x, y]
+                ].some(([x1, y1, x2, y2]) => distToSeg(px, py, x1, y1, x2, y2) <= thr);
+                if (inside || onEdge) candidates.push(s);
+            } else if (s.type === 'circle') {
+                const cx = s.x + s.w / 2, cy = s.y + s.h / 2, rx = Math.max(s.w / 2, 1), ry = Math.max(s.h / 2, 1);
+                const d = Math.hypot((px - cx) / rx, (py - cy) / ry);
+                const edgeTol = thr / Math.min(rx, ry);
+                if (d <= 1 + edgeTol) candidates.push(s);
+            }
+        }
+        if (candidates.length === 0) return null;
+
+        // まだ塗りつぶされていない（ふちだけの）図形を優先し、入れ子の場合は内側の小さい図形を優先
+        const unfilled = candidates.filter(s => !s.fill);
+        if (unfilled.length > 0) {
+            return unfilled.reduce((best, cur) => (cur.w * cur.h < best.w * best.h ? cur : best), unfilled[0]);
+        }
+        // すべて塗りつぶし済みの場合は、異なる色の図形があれば面積最小のものを返す（色の塗り替え用）
+        const diffColor = candidates.filter(s => (s.fillColor || s.color) !== currentColor);
+        if (diffColor.length > 0) {
+            return diffColor.reduce((best, cur) => (cur.w * cur.h < best.w * best.h ? cur : best), diffColor[0]);
+        }
+        return null;
+    }
+
+    function fillShapeAt(px, py) {
+        const target = findShapeToFill(px, py);
+        if (!target) return false;
+        target.fill = true;
+        target.fillColor = currentColor;
+        shapesCacheValid = false;
+        composite();
+        saveUndoState();
+        return true;
     }
 
     function moveShape(s, dx, dy) {
@@ -716,6 +767,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (currentTool === 'text') { addTextInput(pos.x, pos.y); return; }
+        if (currentTool === 'fill') { fillShapeAt(pos.x, pos.y); return; }
         if (currentTool === 'move') {
             const hit = hitTest(pos.x, pos.y);
             const prevSelected = selectedShape;
@@ -789,7 +841,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const rh = Math.abs(h);
         if (rw > 0 || rh > 0) {
             if (rw > 0 && rh > 0) {
-                return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize, fill: fillMode };
+                return { type: 'rect', x: rx, y: ry, w: rw, h: rh, color: currentColor, size: currentSize, fill: false };
             } else {
                 return { type: 'line', x1: x1, y1: y1, x2: x2, y2: y2, color: currentColor, size: currentSize };
             }
@@ -807,7 +859,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const aw = Math.abs(w), ah = Math.abs(h);
         if (aw < 2 || ah < 2) return null;
         return { type: 'circle', x: w < 0 ? x1 + w : x1, y: h < 0 ? y1 + h : y1, w: aw, h: ah,
-                 color: currentColor, size: currentSize, fill: fillMode };
+                 color: currentColor, size: currentSize, fill: false };
     }
 
     // 四角形または直線（水平線/垂直線）を自動判別してシェイプを生成
@@ -885,6 +937,10 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (!isDragging) {
                 if (e.target === canvas) canvas.style.cursor = hitTest(pos.x, pos.y) ? 'move' : 'default';
             }
+            return;
+        }
+        if (currentTool === 'fill') {
+            if (e.target === canvas) canvas.style.cursor = findShapeToFill(pos.x, pos.y) ? 'pointer' : 'crosshair';
             return;
         }
         if (!isDrawing) return;
@@ -1055,7 +1111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateToolStatusUI() {
-        const lbl = { pencil: 'Pencil', line: 'Line (Magnet)', rect: 'Rect / Line', circle: 'Circle', text: 'Text', move: 'Move' };
+        const lbl = { pencil: 'Pencil', line: 'Line (Magnet)', rect: 'Rect / Line', circle: 'Circle', fill: 'Fill', text: 'Text', move: 'Move' };
         let statusText = `Mode: ${lbl[currentTool] || currentTool}`;
         const rectBtn = document.getElementById('btn-rect');
         const lineBtn = document.getElementById('btn-line');
@@ -1082,8 +1138,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Event Listeners ===
     toolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            if (btn.dataset.toggle) return; // 塗りつぶしはトグルとして別処理
-            const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-circle':'circle','btn-text':'text','btn-move':'move'};
+            const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-circle':'circle','btn-fill':'fill','btn-text':'text','btn-move':'move'};
             const clickedTool = map[btn.id] || 'pencil';
 
             if (clickedTool === 'rect' && currentTool === 'rect') {
@@ -1148,16 +1203,6 @@ document.addEventListener('DOMContentLoaded', () => {
         brushSizeInput.dispatchEvent(new Event('input'));
     });
 
-    // 塗りつぶしトグル: ON の間、四角・丸を塗りつぶして描く
-    const btnFill = document.getElementById('btn-fill');
-    if (btnFill) btnFill.addEventListener('click', () => {
-        fillMode = !fillMode;
-        btnFill.classList.toggle('fill-on', fillMode);
-        const el = document.getElementById('tool-status');
-        if (el) { el.textContent = fillMode ? 'Fill: ON' : 'Fill: OFF'; }
-        clearTimeout(statusTimeout);
-        statusTimeout = setTimeout(updateToolStatusUI, 1600);
-    });
     btnUpload.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', e => {
         handleImages(e.target.files);
