@@ -1220,9 +1220,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnNext) btnNext.addEventListener('click', () => showPage(pageIdx + 1));
     // === 透過ボタン & ポップアップのイベント ===
     if (btnOpacity) {
+        let opacityDownX = 0, opacityDownY = 0;
+        const cancelLongPress = () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+        };
+
         // ポインターイベントで長押し検知（Android・スマホ・PC対応）
         btnOpacity.addEventListener('pointerdown', e => {
             if (btnOpacity.disabled) return;
+            opacityDownX = e.clientX;
+            opacityDownY = e.clientY;
             isLongPressTriggered = false;
             longPressTimer = setTimeout(() => {
                 isLongPressTriggered = true;
@@ -1233,12 +1243,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 450);
         });
 
-        const cancelLongPress = () => {
-            if (longPressTimer) {
-                clearTimeout(longPressTimer);
-                longPressTimer = null;
+        btnOpacity.addEventListener('pointermove', e => {
+            if (longPressTimer && Math.hypot(e.clientX - opacityDownX, e.clientY - opacityDownY) > 8) {
+                cancelLongPress();
             }
-        };
+        });
         btnOpacity.addEventListener('pointerup', cancelLongPress);
         btnOpacity.addEventListener('pointerleave', cancelLongPress);
         btnOpacity.addEventListener('pointercancel', cancelLongPress);
@@ -1444,8 +1453,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function onTouchMove(e) {
-        // 常にブラウザデフォルトのスクロール・ピンチズーム・pull-to-refreshをブロック
+        const inSidebar = e.target && e.target.closest && e.target.closest('.sidebar');
+        const isCanvasActive = isDrawing || isPanning || isDragging || (e.touches.length >= 2 && lastPinchDistance !== null);
+
+        // ツールバー（.sidebar）内での1本指タッチ移動（横スクロールやスライダー操作）はブラウザ標準動作を妨げない
+        if (inSidebar && !isCanvasActive && e.touches.length === 1) {
+            return;
+        }
+
+        // キャンバス操作中や2本指ピンチ時はブラウザデフォルトのスクロール・ピンチズーム・pull-to-refreshをブロック
         if (e.cancelable) e.preventDefault();
+        if (!isCanvasActive) return;
 
         if (e.touches.length === 1) {
             const t = e.touches[0];
@@ -1570,6 +1588,102 @@ document.addEventListener('DOMContentLoaded', () => {
             applyTransform();
         }
     }, { passive:false });
+
+    // === ツールバー各段の横スクロール補助（スマホ見切れ時のスワイプ＆PCドラッグ・ホイール対応） ===
+    document.querySelectorAll('.toolbar-row').forEach(row => {
+        let isRowMouseDown = false;
+        let rowStartX = 0;
+        let rowScrollLeft = 0;
+        let rowMoved = false;
+
+        // タッチ操作: ネイティブ横スクロールを優先しつつ、動かない環境ではJSで補助
+        let touchStartX = 0;
+        let touchLastX = 0;
+        let touchStartScroll = 0;
+        let manualTouchScroll = false;
+
+        row.addEventListener('touchstart', e => {
+            if (e.touches.length !== 1) return;
+            touchStartX = touchLastX = e.touches[0].clientX;
+            touchStartScroll = row.scrollLeft;
+            manualTouchScroll = false;
+            rowMoved = false;
+        }, { passive: true });
+
+        row.addEventListener('touchmove', e => {
+            if (e.touches.length !== 1) return;
+            if (row.scrollWidth <= row.clientWidth) return;
+            const curX = e.touches[0].clientX;
+            const totalDx = touchStartX - curX;
+            const stepDx = touchLastX - curX;
+            touchLastX = curX;
+
+            if (Math.abs(totalDx) > 6) rowMoved = true;
+
+            // ネイティブスクロールがまだ動いておらず、指が一定以上動いた場合はJSで横スクロール
+            if (manualTouchScroll || (Math.abs(totalDx) > 8 && Math.abs(row.scrollLeft - touchStartScroll) < 1)) {
+                const maxScroll = row.scrollWidth - row.clientWidth;
+                const canScrollRight = totalDx > 0 && row.scrollLeft < maxScroll;
+                const canScrollLeft  = totalDx < 0 && row.scrollLeft > 0;
+                if (manualTouchScroll || canScrollRight || canScrollLeft) {
+                    manualTouchScroll = true;
+                    row.scrollLeft += stepDx;
+                }
+            }
+        }, { passive: true });
+
+        const resetRowMovedSoon = () => {
+            if (rowMoved) {
+                setTimeout(() => { rowMoved = false; }, 100);
+            }
+        };
+        row.addEventListener('touchend', resetRowMovedSoon, { passive: true });
+        row.addEventListener('touchcancel', () => { rowMoved = false; }, { passive: true });
+
+        // マウスドラッグでの横スクロール（PCで狭いウィンドウ幅で使用する場合にも対応）
+        row.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;
+            if (row.scrollWidth <= row.clientWidth) return;
+            isRowMouseDown = true;
+            rowMoved = false;
+            rowStartX = e.clientX;
+            rowScrollLeft = row.scrollLeft;
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (!isRowMouseDown) return;
+            const dx = e.clientX - rowStartX;
+            if (Math.abs(dx) > 5) {
+                rowMoved = true;
+                row.scrollLeft = rowScrollLeft - dx;
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isRowMouseDown) {
+                isRowMouseDown = false;
+                resetRowMovedSoon();
+            }
+        });
+
+        // スクロール操作（ドラッグ）だった場合は直後のボタンclick誤発火をキャンセル
+        row.addEventListener('click', e => {
+            if (rowMoved) {
+                e.stopPropagation();
+                e.preventDefault();
+                rowMoved = false;
+            }
+        }, true);
+
+        // ホイールで横スクロール
+        row.addEventListener('wheel', e => {
+            if (row.scrollWidth <= row.clientWidth) return;
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                row.scrollLeft += e.deltaY;
+                e.preventDefault();
+            }
+        }, { passive: false });
+    });
 
     // Mobile check
     function checkMobile() { document.body.classList.toggle('mobile-view', window.innerWidth <= 768); }
