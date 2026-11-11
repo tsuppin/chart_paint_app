@@ -31,18 +31,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTool = 'pencil', currentColor = '#ffffff', currentSize = 3;
     let isDrawing = false, startX = 0, startY = 0, lastPos = {x:0, y:0};
     let currentPath = []; // ペンシル描画中の点列
-    let dragTrajectory = []; // rect描画時の軌跡点列（直線性判定用）
     let rectSubMode = 'auto'; // 'auto' | 'line' | 'rect'
     let lastKeyModifiers = { alt: false, shift: false };
     let rafPending = false; // requestAnimationFrame 管理フラグ
     let pendingPreview = null; // rAF で描画する最新プレビュー
+    let activeTextCommit = null; // テキスト入力中の確定関数
 
     // Panning & Momentum (Transform-based)
     let isPanning = false; 
     let lastMouseX = 0, lastMouseY = 0; // マウスパン用
     let lastTouchX = 0, lastTouchY = 0, lastTouchTime = 0;
     let velX = 0, velY = 0, momentumID = null;
-    let moveHistory = [];
     let viewX = 0, viewY = 0, viewScale = 1.0;
 
     // shapes 配列: 全描画オブジェクトを格納
@@ -51,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // rect:   { type:'rect',   x,y,w,h,     color, size }
     // text:   { type:'text',   text,x,y,     color, size }
     let shapes = [], selectedShape = null;
-    let isDragging = false, dragStartX = 0, dragStartY = 0;
+    let isDragging = false, hasMovedShape = false, dragStartX = 0, dragStartY = 0;
     let undoStack = [];
     const MAX_UNDO = 30;
     let backgroundImage = null, currentZoom = 1.0;
@@ -144,8 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const getCenter = t => ({x:(t[0].clientX+t[1].clientX)/2, y:(t[0].clientY+t[1].clientY)/2});
 
     // 画面サイズに合わせてキャンバスを配置
-    // isOpeningImage: 画像を開いた直後かどうか
-    function fitToScreen(isOpeningImage = false) {
+    function fitToScreen() {
         const area = document.querySelector('.canvas-area');
         if (!area || canvas.width === 0 || canvas.height === 0) return;
         const areaW = area.clientWidth;
@@ -153,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (areaW === 0 || areaH === 0) return;
 
         const isMobile = window.innerWidth <= 768;
-        const hasImage = !!backgroundImage || isOpeningImage;
+        const hasImage = !!backgroundImage;
         let scale;
 
         if (hasImage) {
@@ -296,6 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 確定済みシェイプはオフスクリーンの shapesCache に描画済みのものを使い回す。
     // これにより、毎フレーム全シェイプを再描画する必要がなくなる。
     function composite(preview) {
+        if (!preview) pendingPreview = null;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         // 背景描画: 画像がある場合は白塗りをせず透過度付きで描画（白くならず自然に透ける）
@@ -354,13 +353,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // === Pencil texture helpers ===
-    // シードベースの疑似乱数（描画のたびに同じノイズパターンを再現）
-    function seededRandom(seed) {
-        let s = seed % 2147483647;
-        if (s <= 0) s += 2147483646;
-        return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
-    }
-
     // ポイント列をベジェ曲線で滑らかに描画するヘルパー
     function traceSmooth(tc, points) {
         if (points.length < 2) return;
@@ -456,6 +448,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return pts;
     }
 
+    function getTextBounds(s) {
+        const fontSize = s.size * 4;
+        const lineH = fontSize * 1.2;
+        const lines = s.text.split('\n');
+        ctx.save();
+        ctx.font = `${fontSize}px Inter, sans-serif`;
+        const width = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 20);
+        ctx.restore();
+        const height = lines.length * lineH;
+        return { fontSize, lineH, lines, width, height };
+    }
+
     function drawObj(tc, s, sel) {
         tc.save();
         if (sel && s.type === 'text') { tc.shadowColor = 'rgba(255,255,255,0.9)'; tc.shadowBlur = 14; }
@@ -493,16 +497,12 @@ document.addEventListener('DOMContentLoaded', () => {
             drawPencilStroke(tc, pts, s.color, s.size, sel);
 
         } else if (s.type === 'text') {
-            const fontSize = s.size * 4;
-            const lineH = fontSize * 1.2;
+            const { fontSize, lineH, lines, width: estW, height: h } = getTextBounds(s);
             tc.font = `${fontSize}px Inter, sans-serif`;
             tc.fillStyle = s.color;
-            s.text.split('\n').forEach((l, i) => tc.fillText(l, s.x, s.y + i * lineH));
+            lines.forEach((l, i) => tc.fillText(l, s.x, s.y + i * lineH));
             if (sel) {
                 // 選択時: テキスト周りを破線ボックスで表示
-                const lines = s.text.split('\n');
-                const estW = lines.reduce((m, l) => Math.max(m, l.length * fontSize * 0.6), 20);
-                const h = lines.length * lineH;
                 tc.setLineDash([4, 3]);
                 tc.strokeStyle = 'rgba(255,255,255,0.85)';
                 tc.lineWidth = 1.5;
@@ -570,7 +570,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (s.type === 'pencil') {
                 const step = Math.max(1, Math.floor(s.points.length / 80));
                 for (let j = 0; j < s.points.length - 1; j += step) {
-                    if (distToSeg(px, py, s.points[j].x, s.points[j].y, s.points[j+1].x, s.points[j+1].y) <= thr) return s;
+                    const nextIdx = Math.min(j + step, s.points.length - 1);
+                    if (distToSeg(px, py, s.points[j].x, s.points[j].y, s.points[nextIdx].x, s.points[nextIdx].y) <= thr) return s;
                 }
             } else if (s.type === 'line') {
                 if (distToSeg(px, py, s.x1, s.y1, s.x2, s.y2) <= thr) return s;
@@ -590,11 +591,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const edgeTol = thr / Math.min(rx, ry);
                 if (s.fill ? d <= 1 + edgeTol : Math.abs(d - 1) <= edgeTol) return s;
             } else if (s.type === 'text') {
-                const fontSize = s.size * 4;
-                const lineH = fontSize * 1.2;
-                const lines = s.text.split('\n');
-                const estW = lines.reduce((m, l) => Math.max(m, l.length * fontSize * 0.6), 20);
-                const h = lines.length * lineH;
+                const { fontSize, width: estW, height: h } = getTextBounds(s);
                 if (px >= s.x-14 && px <= s.x+estW+14 && py >= s.y-fontSize-14 && py <= s.y+h+14) return s;
             }
         }
@@ -661,8 +658,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // === Text Input Overlay ===
     function addTextInput(x, y) {
-        const ex = document.getElementById('temp-text-input');
-        if (ex) ex.remove();
+        if (activeTextCommit) activeTextCommit();
         const input = document.createElement('textarea');
         input.id = 'temp-text-input';
         input.placeholder = '文字を入力\n(枠外クリックで確定)';
@@ -692,29 +688,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         setTimeout(() => { input.focus(); resize(); }, 10);
         input.addEventListener('input', resize);
+
+        let done = false;
+        const outside = e => {
+            if (e.target !== input) finish();
+        };
+        const cleanup = () => {
+            document.removeEventListener('mousedown', outside);
+            document.removeEventListener('touchstart', outside);
+            msr.remove();
+            input.remove();
+            if (activeTextCommit === finish) activeTextCommit = null;
+        };
         const finish = () => {
-            if (input.value && input.value !== input.placeholder) {
+            if (done) return;
+            done = true;
+            const val = input.value;
+            cleanup();
+            if (val && val !== input.placeholder) {
                 // テキストをシェイプオブジェクトとして格納（移動可能）
-                shapes.push({ type:'text', text:input.value, x, y:y+currentSize*3, color:currentColor, size:currentSize });
+                shapes.push({ type:'text', text:val, x, y:y+currentSize*3, color:currentColor, size:currentSize });
                 shapesCacheValid = false;
                 composite(); saveUndoState();
             }
-            msr.remove(); input.remove();
         };
+        const cancel = () => {
+            if (done) return;
+            done = true;
+            cleanup();
+        };
+        activeTextCommit = finish;
+
         input.addEventListener('keydown', e => {
-            if (e.key==='Enter' && e.ctrlKey) finish();
-            if (e.key==='Escape') { msr.remove(); input.remove(); }
+            if (e.key==='Enter' && e.ctrlKey) { e.preventDefault(); finish(); }
+            if (e.key==='Escape') { e.preventDefault(); cancel(); }
         });
-        const outside = e => {
-            if (e.target !== input) {
-                finish();
-                document.removeEventListener('mousedown', outside);
-                document.removeEventListener('touchstart', outside);
-            }
-        };
         setTimeout(() => {
-            document.addEventListener('mousedown', outside);
-            document.addEventListener('touchstart', outside);
+            if (!done) {
+                document.addEventListener('mousedown', outside);
+                document.addEventListener('touchstart', outside);
+            }
         }, 50);
     }
 
@@ -739,6 +752,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function startDraw(e) {
+        if (dropZone && !dropZone.classList.contains('hidden')) return;
         const pos = getPos(e); lastPos = pos;
         
         // --- PC/マウス操作のパン開始 ---
@@ -771,7 +785,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentTool === 'move') {
             const hit = hitTest(pos.x, pos.y);
             const prevSelected = selectedShape;
-            selectedShape = hit || null; isDragging = !!hit;
+            selectedShape = hit || null; isDragging = !!hit; hasMovedShape = false;
             dragStartX = pos.x; dragStartY = pos.y;
             canvas.style.cursor = hit ? 'grabbing' : 'default';
             // 選択状態が変わったらキャッシュ無効化（選択シェイプはキャッシュ対象外のため）
@@ -923,12 +937,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isDragging && selectedShape) {
                 const dx = pos.x - dragStartX;
                 const dy = pos.y - dragStartY;
-                dragStartX = pos.x; dragStartY = pos.y;
-                moveShape(selectedShape, dx, dy);
-                // selectedShape はキャッシュに含まれないため、キャッシュは有効のまま
-                if (!rafPending) {
-                    rafPending = true;
-                    requestAnimationFrame(() => { composite(); rafPending = false; });
+                if (dx !== 0 || dy !== 0) {
+                    dragStartX = pos.x; dragStartY = pos.y;
+                    moveShape(selectedShape, dx, dy);
+                    hasMovedShape = true;
+                    // selectedShape はキャッシュに含まれないため、キャッシュは有効のまま
+                    if (!rafPending) {
+                        rafPending = true;
+                        requestAnimationFrame(() => { composite(); rafPending = false; });
+                    }
                 }
             } else if (!isDragging) {
                 if (e.target === canvas) canvas.style.cursor = hitTest(pos.x, pos.y) ? 'move' : 'default';
@@ -970,11 +987,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (currentTool === 'move') {
-            if (isDragging && selectedShape) {
+            if (isDragging && selectedShape && hasMovedShape) {
                 shapesCacheValid = false;
                 saveUndoState();
             }
             isDragging = false;
+            hasMovedShape = false;
             canvas.style.cursor = selectedShape ? 'move' : 'default';
             return;
         }
@@ -985,6 +1003,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 shapes.push({ type:'pencil', points:[...currentPath], color:currentColor, size:currentSize });
                 shapesCacheValid = false;
                 composite(); saveUndoState();
+            } else {
+                composite();
             }
             currentPath = [];
         } else if (currentTool === 'line') {
@@ -993,6 +1013,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 shapes.push({ type:'line', x1:startX, y1:startY, x2:mag.x, y2:mag.y, color:currentColor, size:currentSize });
                 shapesCacheValid = false;
                 composite(); saveUndoState();
+            } else {
+                composite();
             }
         } else if (currentTool === 'rect') {
             const shape = getRectOrLineShape(lastPos.x, lastPos.y, lastKeyModifiers.alt, lastKeyModifiers.shift);
@@ -1000,6 +1022,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 shapes.push(shape);
                 shapesCacheValid = false;
                 composite(); saveUndoState();
+            } else {
+                composite();
             }
         } else if (currentTool === 'circle') {
             const shape = makeCircleShape(startX, startY, lastPos.x, lastPos.y, lastKeyModifiers.shift);
@@ -1007,18 +1031,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 shapes.push(shape);
                 shapesCacheValid = false;
                 composite(); saveUndoState();
+            } else {
+                composite();
             }
         }
     }
 
     // === Image / Save / Clear ===
     // 複数画像: pages[i] = { file, state }  state は離脱時に保存(描画内容など)
-    let pages = [], pageIdx = -1;
+    let pages = [], pageIdx = -1, pageLoadSeq = 0;
     function stashCurrentPage() {
+        if (activeTextCommit) activeTextCommit();
         const pg = pages[pageIdx]; if (!pg || !backgroundImage) return;
         pg.state = {
             img: backgroundImage, w: canvas.width, h: canvas.height, bgOpacity,
             base: cloneID(baseCtx.getImageData(0, 0, baseCanvas.width, baseCanvas.height)),
+            baseVer: baseVersion,
+            lastBase: lastBaseImageData,
             shapes, undoStack
         };
     }
@@ -1028,34 +1057,46 @@ document.addEventListener('DOMContentLoaded', () => {
         pager.classList.toggle('hidden', pages.length < 2);
         const lbl = document.getElementById('pager-label');
         if (lbl) lbl.textContent = `${pageIdx + 1}/${pages.length}`;
+        const prevBtn = document.getElementById('btn-page-prev');
+        const nextBtn = document.getElementById('btn-page-next');
+        if (prevBtn) prevBtn.disabled = pageIdx <= 0;
+        if (nextBtn) nextBtn.disabled = pageIdx >= pages.length - 1;
         const el = document.getElementById('upload-filename');
         const f = pages[pageIdx] && pages[pageIdx].file;
         if (el && f) { el.textContent = f.name; el.title = f.name; }
     }
     function showPage(i) {
         if (i < 0 || i >= pages.length) return;
+        if (activeTextCommit) activeTextCommit();
         if (i !== pageIdx) stashCurrentPage();
         pageIdx = i;
         const pg = pages[i];
         updatePagerUI();
         if (pg.state) {
+            pageLoadSeq++;
             const st = pg.state;
             backgroundImage = st.img; bgOpacity = st.bgOpacity; updateOpacityUI();
             canvas.width = baseCanvas.width = shapesCache.width = st.w;
             canvas.height = baseCanvas.height = shapesCache.height = st.h;
             baseCtx.putImageData(cloneID(st.base), 0, 0);
+            baseVersion = st.baseVer !== undefined ? st.baseVer : baseVersion + 1;
+            lastBaseImageData = st.lastBase || cloneID(st.base);
             shapes = st.shapes; undoStack = st.undoStack; selectedShape = null; currentPath = [];
             fitToScreen();
             shapesCacheValid = false;
-            updateBaseSnapshot();
+            updateUndoBtn();
             composite();
             dropZone.classList.add('hidden');
             return;
         }
+        const seq = ++pageLoadSeq;
+        backgroundImage = null;
         const reader = new FileReader();
         reader.onload = ev => {
+            if (seq !== pageLoadSeq) return;
             const img = new Image();
             img.onload = () => {
+                if (seq !== pageLoadSeq) return;
                 backgroundImage = img;
                 bgOpacity = 1.0;
                 updateOpacityUI();
@@ -1091,16 +1132,28 @@ document.addEventListener('DOMContentLoaded', () => {
         pageIdx = -1;
         showPage(0);
     }
-    function handleImage(file) { if (file) handleImages([file]); }
     function saveImage() {
+        if (activeTextCommit) activeTextCommit();
+        const prevSelected = selectedShape;
+        if (prevSelected) {
+            selectedShape = null;
+            shapesCacheValid = false;
+        }
         composite();
+        const dataUrl = canvas.toDataURL();
+        if (prevSelected) {
+            selectedShape = prevSelected;
+            shapesCacheValid = false;
+            composite();
+        }
         const a = document.createElement('a');
         a.download = `paint-edit-${Date.now()}.png`;
-        a.href = canvas.toDataURL(); a.click();
+        a.href = dataUrl; a.click();
     }
 
     function clearCanvas() {
         if (!confirm('キャンバスをクリアしますか？')) return;
+        if (activeTextCommit) activeTextCommit();
         shapes = []; selectedShape = null; currentPath = [];
         shapesCacheValid = false;
         composite(); saveUndoState();
@@ -1134,6 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // === Event Listeners ===
     toolBtns.forEach(btn => {
         btn.addEventListener('click', () => {
+            if (activeTextCommit) activeTextCommit();
             const map = {'btn-pencil':'pencil','btn-line':'line','btn-rect':'rect','btn-circle':'circle','btn-fill':'fill','btn-text':'text','btn-move':'move'};
             const clickedTool = map[btn.id] || 'pencil';
 
@@ -1248,7 +1302,7 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOpacity.addEventListener('pointerleave', cancelLongPress);
         btnOpacity.addEventListener('pointercancel', cancelLongPress);
 
-        // クリック（長押しでなければサイクル切替: 100% -> 75% -> 50% -> 25% -> 0% -> 100%）
+        // クリック（長押しでなければサイクル切替: 10%刻みで 100% -> 90% -> ... -> 0% -> 100%）
         btnOpacity.addEventListener('click', e => {
             if (btnOpacity.disabled) return;
             if (isLongPressTriggered) {
@@ -1305,15 +1359,21 @@ document.addEventListener('DOMContentLoaded', () => {
     setGridVisible(showGrid);
 
     document.addEventListener('keydown', e => {
-        // G キーでグリッド切替（テキスト入力中は無視）
+        // テキスト入力中はショートカットを無視
         const tag = (e.target && e.target.tagName) || '';
-        if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'g' || e.key === 'G')
-            && tag !== 'INPUT' && tag !== 'TEXTAREA' && !(e.target && e.target.isContentEditable)) {
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+
+        // G キーでグリッド切替
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'g' || e.key === 'G')) {
             e.preventDefault();
             setGridVisible(!showGrid);
         }
-        if ((e.ctrlKey||e.metaKey) && e.key==='z') { e.preventDefault(); undo(); }
-        if ((e.key==='Delete'||e.key==='Backspace') && selectedShape && currentTool==='move') {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+            e.preventDefault();
+            undo();
+        }
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShape && currentTool === 'move') {
+            e.preventDefault();
             shapes = shapes.filter(s => s !== selectedShape);
             selectedShape = null;
             shapesCacheValid = false;
@@ -1323,11 +1383,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Drag & Drop
     window.addEventListener('dragover', e => { e.preventDefault(); if (!backgroundImage) dropZone.classList.remove('hidden'); });
-    window.addEventListener('dragleave', e => { 
-        if (e.relatedTarget === null || e.relatedTarget === undefined) {
-             // 画面外に出た場合のみ表示（オプション）
-        }
-    });
     window.addEventListener('drop', e => { 
         e.preventDefault(); 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
@@ -1387,12 +1442,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Touch（1本指=描画/移動/余白パン、2本指=ピンチズーム＆パン） ---
     function onTouchStart(e) {
+        if (e.target && e.target.id === 'temp-text-input') return;
+        if (dropZone && !dropZone.classList.contains('hidden') && dropZone.contains(e.target)) return;
+
         stopMomentum();
         if (e.touches.length === 1) {
             const t = e.touches[0];
             lastTouchX = t.clientX; lastTouchY = t.clientY;
             lastTouchTime = Date.now();
-            velX = 0; velY = 0; moveHistory = [];
+            velX = 0; velY = 0;
 
             // タッチ位置がキャンバス枠内かどうかを判定
             const rect = canvas.getBoundingClientRect();
@@ -1407,7 +1465,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const hit = isInsideCanvas ? hitTest(pos.x, pos.y) : null;
                 if (hit) {
                     const prevSelected = selectedShape;
-                    selectedShape = hit; isDragging = true;
+                    selectedShape = hit; isDragging = true; hasMovedShape = false;
                     dragStartX = pos.x; dragStartY = pos.y;
                     canvas.style.cursor = 'grabbing';
                     if (prevSelected !== selectedShape) shapesCacheValid = false;
@@ -1415,7 +1473,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     // 背景や余白タッチならパンモードへ
                     const prevSelected = selectedShape;
-                    selectedShape = null; isDragging = false;
+                    selectedShape = null; isDragging = false; hasMovedShape = false;
                     isPanning = true;
                     if (prevSelected !== null) shapesCacheValid = false;
                     composite();
@@ -1424,8 +1482,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // 描画ツールの場合:
-            // キャンバス内なら描画開始、余白（キャンバス外）ならパンを開始
-            if (isInsideCanvas) {
+            // キャンバス内（かつドロップゾーン非表示）なら描画開始、余白（キャンバス外）ならパンを開始
+            if (isInsideCanvas && (!dropZone || dropZone.classList.contains('hidden'))) {
                 e.preventDefault();
                 startDraw(e);
             } else {
